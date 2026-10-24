@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "texloop"
+name = "laitex"
 version = "0.1.0"
 description = "Review a PDF in your browser and send the comments to your coding agent"
 readme = "README.md"
@@ -18,13 +18,13 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/autolab-ai/texloop"
+Homepage = "https://github.com/autolab-ai/laitex"
 
 [project.scripts]
-texloop = "texloop.cli:main"
+laitex = "laitex.cli:main"
 
 [tool.setuptools]
-packages = ["texloop"]
+packages = ["laitex"]
 
 [tool.setuptools.package-data]
-texloop = ["viewer.html", "SKILL.md"]
+laitex = ["viewer.html", "SKILL.md"]

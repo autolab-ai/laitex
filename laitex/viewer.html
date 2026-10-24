@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>texloop</title>
+<title>laitex</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root { --side: 340px; }
@@ -455,7 +455,7 @@ async function poll() {
     const ag = document.getElementById("agent");
     ag.className = st.listening ? "on" : "";
     ag.querySelector("span").textContent = st.listening ? agentName + " is listening" : agentName + " is not listening";
-    ag.title = st.listening ? "" : "Ask your agent to review this PDF with texloop; requests wait here until it does.";
+    ag.title = st.listening ? "" : "Ask your agent to review this PDF with laitex; requests wait here until it does.";
     updateSendBtn();
     const m = st.mtime;
     if (m && m !== mtime && pop.style.display !== "block") {
