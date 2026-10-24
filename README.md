@@ -11,7 +11,17 @@
 [![Works with LaTeX and Typst](https://img.shields.io/badge/LaTeX%20%7C%20Typst%20%7C%20any%20PDF-supported-555)](#how-the-agent-connects)
 [![GitHub stars](https://img.shields.io/github/stars/autolab-ai/texloop?style=social)](https://github.com/autolab-ai/texloop)
 
-<a href="#quick-start"><img alt="Copy prompt for your agent" src="https://img.shields.io/badge/%F0%9F%93%8B%20Copy%20prompt%20for%20your%20agent-D97757?style=for-the-badge"></a>
+**Paste this into your coding agent** (the copy button is in the corner of the box):
+
+</div>
+
+```text
+Use texloop (https://github.com/autolab-ai/texloop) to get my feedback on paper.pdf.
+Clone it to ~/.texloop, or `git -C ~/.texloop pull` if it is already there, then read
+~/.texloop/texloop/SKILL.md and follow it: open paper.pdf in texloop and wait for my comments.
+```
+
+<div align="center">
 
 [Quick start](#quick-start) · [What it works with](#what-it-works-with) · [Using the viewer](#using-the-viewer) · [How the agent connects](#how-the-agent-connects) · [Contributing](#contributing)
 
