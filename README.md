@@ -168,7 +168,7 @@ A comment is `open` until the agent handles it, then `resolved` (the change is m
 `answered` (the agent only replied, for example with a question). Editing a comment in the
 viewer sets it back to `open`.
 
-In Claude Code the skill runs `laitex wait` as a background command, so Claude wakes up
+In Claude Code the skill runs `laitex wait` as a background command, so the agent wakes up
 when you press Send and you can keep talking to it in the meantime. Agents without
 background commands run `laitex wait --timeout 600` in a loop.
 
@@ -191,7 +191,7 @@ laitex open doc.pdf [--port 8765] [--app] [--no-browser] [--agent-name NAME]
 
 - `--port` is the first port to try. If it is taken, the next free one is used. Also `LAITEX_PORT`.
 - `--app` opens a separate Chrome window without tabs and address bar.
-- `--agent-name` sets the name on the buttons, "Claude" by default. Also `LAITEX_AGENT`.
+- `--agent-name` sets the name on the buttons, for example `--agent-name Claude`. The default is "the agent". Also `LAITEX_AGENT`.
 
 `laitex serve doc.pdf` runs the server in the foreground and `laitex stop doc.pdf` stops
 it. The server listens on 127.0.0.1 only. PDF.js is loaded from cdnjs, so the browser needs

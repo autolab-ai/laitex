@@ -39,7 +39,7 @@ keeps the skill current.
 5. Go back to step 3. Stop when the user says the review is over, then
    `laitex stop path/to/doc.pdf` if they want the viewer closed.
 
-While `wait` is running the viewer shows "Claude is listening". Requests sent while you are
+While `wait` is running the viewer shows "The agent is listening". Requests sent while you are
 not listening are kept and picked up by the next `wait`.
 
 ## Request format

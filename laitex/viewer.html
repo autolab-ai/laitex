@@ -76,7 +76,7 @@
   </div>
   <button id="sendBtn" style="width:100%;margin-bottom:6px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Send comments</button>
   <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:#fff;color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
-  <div id="agent"><i></i><span>agent not listening</span></div>
+  <div id="agent"><i></i><span>The agent is not listening</span></div>
   <label><input type="checkbox" id="showResolved"> show resolved</label>
   <div id="list" style="margin-top:8px"></div>
   <details id="keys" open style="font-size:12px;color:#555">
@@ -106,7 +106,8 @@ const main = document.getElementById("main");
 const pagesEl = document.getElementById("pages");
 const statusEl = document.getElementById("status");
 let mtime = null, comments = [], loading = false, pending = null, activeId = null, editing = null;
-let agentName = "Claude", request_ = null;
+let agentName = "the agent", request_ = null;
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 let doc = null, sizes = [], gen = 0;  // sizes: unscaled page sizes in PDF points
 
 let zoom = 1;
@@ -458,12 +459,12 @@ async function poll() {
       document.title = st.name; document.getElementById("docname").textContent = st.name;
       document.getElementById("docname").title = st.pdf;
     }
-    agentName = st.agent_name || "Claude";
+    agentName = st.agent_name || "the agent";
     document.querySelectorAll(".an").forEach(s => s.textContent = agentName);
     request_ = st.request;
     const ag = document.getElementById("agent");
     ag.className = st.listening ? "on" : "";
-    ag.querySelector("span").textContent = st.listening ? agentName + " is listening" : agentName + " is not listening";
+    ag.querySelector("span").textContent = cap(agentName) + (st.listening ? " is listening" : " is not listening");
     ag.title = st.listening ? "" : "Ask your agent to review this PDF with laitex; requests wait here until it does.";
     updateSendBtn();
     const m = st.mtime;

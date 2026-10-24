@@ -408,8 +408,8 @@ def main(argv=None):
                            ("serve", cmd_serve, "run the viewer in the foreground")):
         s = pdf_cmd(name, fn, help)
         s.add_argument("--port", type=int, default=int(os.environ.get("LAITEX_PORT", DEFAULT_PORT)))
-        s.add_argument("--agent-name", default=os.environ.get("LAITEX_AGENT", "Claude"),
-                       help="name shown on the buttons (default: Claude)")
+        s.add_argument("--agent-name", default=os.environ.get("LAITEX_AGENT", "the agent"),
+                       help='name shown on the buttons, e.g. Claude (default: "the agent")')
         if name == "open":
             s.add_argument("--no-browser", action="store_true", help="only start the server")
             s.add_argument("--app", action="store_true", help="open a chromeless Chrome window")
