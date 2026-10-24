@@ -1,32 +1,32 @@
 <div align="center">
 
-# pdfloop
+# texloop
 
 **Review a PDF in your browser. Your coding agent applies the comments.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](pyproject.toml)
-[![Claude Code skill](https://img.shields.io/badge/Claude%20Code-skill-D97757)](pdfloop/SKILL.md)
+[![Claude Code skill](https://img.shields.io/badge/Claude%20Code-skill-D97757)](texloop/SKILL.md)
 [![Works with LaTeX and Typst](https://img.shields.io/badge/LaTeX%20%7C%20Typst%20%7C%20any%20PDF-supported-555)](#how-the-agent-connects)
-[![GitHub stars](https://img.shields.io/github/stars/autolab-ai/pdfloop?style=social)](https://github.com/autolab-ai/pdfloop)
+[![GitHub stars](https://img.shields.io/github/stars/autolab-ai/texloop?style=social)](https://github.com/autolab-ai/texloop)
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/autolab-ai/pdfloop/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/autolab-ai/texloop/main/install.sh | sh
 ```
 
-[Quick start](#quick-start) · [Using the viewer](#using-the-viewer) · [How the agent connects](#how-the-agent-connects) · [Other agents](#other-agents)
+[Quick start](#quick-start) · [What it works with](#what-it-works-with) · [Using the viewer](#using-the-viewer) · [How the agent connects](#how-the-agent-connects) · [Other agents](#other-agents)
 
 </div>
 
 You read the compiled PDF; the agent edits the LaTeX, Typst or Markdown source. Without a
 tool in between, every comment has to be copied out of the PDF, found again in the source
-and explained in a chat window. With pdfloop you select a sentence on the page, type what
+and explained in a chat window. With texloop you select a sentence on the page, type what
 you want, and press Cmd+Enter. The agent gets each comment with the quoted text and its
 surroundings, edits the source, rebuilds, and answers next to your comment. The PDF reloads
 in place, at the spot you were reading.
 
-![Writing a comment in pdfloop while the agent's replies show in the sidebar](docs/review.png)
+![Writing a comment in texloop while the agent's replies show in the sidebar](docs/review.png)
 
 - One Python file and one HTML page. No dependencies beyond Python 3.8+.
 - Works with any agent that can run shell commands. Ships with a skill for Claude Code.
@@ -35,42 +35,53 @@ in place, at the spot you were reading.
 
 ## Quick start
 
-Paste this into Claude Code (or any agent that can run shell commands):
+Copy this prompt into Claude Code, Codex, Cursor or any other agent that can run shell
+commands, and replace `paper.pdf` with your file:
 
 ```text
-Install pdfloop from https://github.com/autolab-ai/pdfloop (run its install.sh),
-then open paper.pdf in it so I can review it.
+Set up texloop (https://github.com/autolab-ai/texloop) and use it to get my feedback on paper.pdf:
+1. Install it: curl -LsSf https://raw.githubusercontent.com/autolab-ai/texloop/main/install.sh | sh
+2. Run `texloop guide` and follow those instructions for the rest of this review.
+3. Open paper.pdf in texloop and wait for my comments.
 ```
 
-Or install it yourself with one command. It installs the `pdfloop` CLI with uv, pipx or pip
-and adds the skill to `~/.claude/skills`:
+The agent installs the CLI, reads its instructions, opens the PDF in your browser and starts
+listening. Select text, write a comment, press Enter to save it. When you have a few, press
+Cmd+Enter to send them all. Each comment gets a reply once the agent has handled it, and
+the PDF reloads with the changes.
+
+From then on the skill is installed, so one sentence starts a review:
+
+> Open paper.pdf in texloop, I want to review it.
+
+To install it yourself instead, run the same command. It installs the `texloop` CLI with
+uv, pipx or pip and adds the skill for Claude Code and Codex:
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/autolab-ai/pdfloop/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/autolab-ai/texloop/main/install.sh | sh
 ```
-
-After that, one sentence starts a review:
-
-> Open paper.pdf in pdfloop, I want to review it.
-
-The agent opens the viewer, starts listening, and waits. Select text, write a comment,
-press Enter to save it. When you have a few, press Cmd+Enter to send them all. The
-sidebar shows "Claude is listening" while the agent waits for you, and each comment gets a
-reply once it is handled.
 
 To try the viewer without an agent, open the example paper:
 
 ```sh
-git clone https://github.com/autolab-ai/pdfloop && cd pdfloop
-pdfloop open examples/paper/paper.pdf
+git clone https://github.com/autolab-ai/texloop && cd texloop
+texloop open examples/paper/paper.pdf
 ```
 
-Manual install, if you prefer it:
+## What it works with
 
-```sh
-uv tool install git+https://github.com/autolab-ai/pdfloop   # or pipx install / pip install
-pdfloop install-skill
-```
+Any agent that can run shell commands. The instructions come from the CLI itself
+(`texloop guide`), so the agent does not need skill support. Agents that can run a command
+in the background, like Claude Code, keep talking to you while they wait for comments.
+Others wait in the foreground with `texloop wait --timeout 600`, so you comment in the
+viewer instead of the chat until you end the review.
+
+Any PDF. texloop watches the PDF file and reloads it when it changes, so it works with
+LaTeX (pdflatex, latexmk, tectonic), Typst, pandoc, Quarto or anything else that writes a
+PDF. The agent finds and runs your build command. Source-level fixes need a source the agent
+can edit, so a PDF exported from Word can be commented on but not changed. With Overleaf,
+work in a local clone of the project (Overleaf's git integration) so the agent can edit and
+build it.
 
 ## Using the viewer
 
@@ -99,18 +110,18 @@ The viewer also:
 
 ## How the agent connects
 
-The viewer and the agent share a folder next to the PDF, `.pdfloop/<name>/`, which ignores
+The viewer and the agent share a folder next to the PDF, `.texloop/<name>/`, which ignores
 itself in git. The agent does not touch that folder directly. It uses five commands:
 
 | Command | What it does |
 | --- | --- |
-| `pdfloop open doc.pdf` | start the viewer (once per PDF) and open the browser; prints the URL |
-| `pdfloop wait doc.pdf` | block until you press Send or Commit, then print the request as JSON |
-| `pdfloop reply doc.pdf ID "text"` | answer a comment and mark it resolved (`--status answered` to only reply) |
-| `pdfloop done doc.pdf` | tell the viewer the request is handled |
-| `pdfloop comments doc.pdf` | list open comments as JSON (`--status all` for every comment) |
+| `texloop open doc.pdf` | start the viewer (once per PDF) and open the browser; prints the URL |
+| `texloop wait doc.pdf` | block until you press Send or Commit, then print the request as JSON |
+| `texloop reply doc.pdf ID "text"` | answer a comment and mark it resolved (`--status answered` to only reply) |
+| `texloop done doc.pdf` | tell the viewer the request is handled |
+| `texloop comments doc.pdf` | list open comments as JSON (`--status all` for every comment) |
 
-`pdfloop wait` prints:
+`texloop wait` prints:
 
 ```json
 {
@@ -134,43 +145,43 @@ itself in git. The agent does not touch that folder directly. It uses five comma
 this review). One round looks like this:
 
 ```sh
-pdfloop wait paper.pdf            # returns when the reader presses Send
+texloop wait paper.pdf            # returns when the reader presses Send
 # ...edit paper.tex, rebuild paper.pdf...
-pdfloop reply paper.pdf 67858717 "Now: 'They edit the source but never see the rendered page.'"
-pdfloop reply paper.pdf 84d5a63c "Which figure, 3 or 4?" --status answered
-pdfloop done paper.pdf
-pdfloop wait paper.pdf            # next round
+texloop reply paper.pdf 67858717 "Now: 'They edit the source but never see the rendered page.'"
+texloop reply paper.pdf 84d5a63c "Which figure, 3 or 4?" --status answered
+texloop done paper.pdf
+texloop wait paper.pdf            # next round
 ```
 
 A comment is `open` until the agent handles it, then `resolved` (the change is made) or
 `answered` (the agent only replied, for example with a question). Editing a comment in the
 viewer sets it back to `open`.
 
-In Claude Code the skill runs `pdfloop wait` as a background command, so Claude wakes up
+In Claude Code the skill runs `texloop wait` as a background command, so Claude wakes up
 when you press Send and you can keep talking to it in the meantime. Agents without
-background commands run `pdfloop wait --timeout 600` in a loop.
+background commands run `texloop wait --timeout 600` in a loop.
 
 ### Other agents
 
-The skill is a plain [`SKILL.md`](pdfloop/SKILL.md) file. Install it wherever your agent
-looks for skills, or paste it into the agent's instructions:
+The skill is a plain [`SKILL.md`](texloop/SKILL.md) file, and `texloop guide` prints the
+same text for agents without skill support. To install the skill somewhere else:
 
 ```sh
-pdfloop install-skill --project            # ./.claude/skills/pdfloop
-pdfloop install-skill --dir ~/.codex/skills
+texloop install-skill --project            # ./.claude/skills/texloop
+texloop install-skill --dir ~/.codex/skills
 ```
 
 ## Options
 
 ```
-pdfloop open doc.pdf [--port 8765] [--app] [--no-browser] [--agent-name NAME]
+texloop open doc.pdf [--port 8765] [--app] [--no-browser] [--agent-name NAME]
 ```
 
-- `--port` is the first port to try. If it is taken, the next free one is used. Also `PDFLOOP_PORT`.
+- `--port` is the first port to try. If it is taken, the next free one is used. Also `TEXLOOP_PORT`.
 - `--app` opens a separate Chrome window without tabs and address bar.
-- `--agent-name` sets the name on the buttons, "Claude" by default. Also `PDFLOOP_AGENT`.
+- `--agent-name` sets the name on the buttons, "Claude" by default. Also `TEXLOOP_AGENT`.
 
-`pdfloop serve doc.pdf` runs the server in the foreground and `pdfloop stop doc.pdf` stops
+`texloop serve doc.pdf` runs the server in the foreground and `texloop stop doc.pdf` stops
 it. The server listens on 127.0.0.1 only. PDF.js is loaded from cdnjs, so the browser needs
 internet access to load the viewer.
 

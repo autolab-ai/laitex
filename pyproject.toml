@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pdfloop"
+name = "texloop"
 version = "0.1.0"
 description = "Review a PDF in your browser and send the comments to your coding agent"
 readme = "README.md"
@@ -18,13 +18,13 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/autolab-ai/pdfloop"
+Homepage = "https://github.com/autolab-ai/texloop"
 
 [project.scripts]
-pdfloop = "pdfloop.cli:main"
+texloop = "texloop.cli:main"
 
 [tool.setuptools]
-packages = ["pdfloop"]
+packages = ["texloop"]
 
 [tool.setuptools.package-data]
-pdfloop = ["viewer.html", "SKILL.md"]
+texloop = ["viewer.html", "SKILL.md"]

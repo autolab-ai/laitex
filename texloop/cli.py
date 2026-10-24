@@ -1,8 +1,8 @@
-"""pdfloop: review a PDF in the browser and hand the comments to a coding agent.
+"""texloop: review a PDF in the browser and hand the comments to a coding agent.
 
 The viewer and the agent share a small state folder next to the PDF
-(.pdfloop/<name>/). The viewer writes comments and requests there; the agent reads
-them with `pdfloop wait` and answers with `pdfloop reply` and `pdfloop done`.
+(.texloop/<name>/). The viewer writes comments and requests there; the agent reads
+them with `texloop wait` and answers with `texloop reply` and `texloop done`.
 The viewer itself never edits your files or runs git.
 """
 import argparse
@@ -28,7 +28,7 @@ except ImportError:  # Windows: fall back to the in-process lock only
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PORT = 8765
 STATUSES = ("open", "answered", "resolved")
-# The agent counts as listening if `pdfloop wait` touched its heartbeat this recently.
+# The agent counts as listening if `texloop wait` touched its heartbeat this recently.
 LISTEN_WINDOW = 10
 _THREAD_LOCK = threading.Lock()
 
@@ -41,7 +41,7 @@ class State:
     def __init__(self, pdf):
         self.pdf = os.path.abspath(pdf)
         stem = os.path.splitext(os.path.basename(self.pdf))[0]
-        self.dir = os.path.join(os.path.dirname(self.pdf), ".pdfloop", stem)
+        self.dir = os.path.join(os.path.dirname(self.pdf), ".texloop", stem)
         self.comments = os.path.join(self.dir, "comments.json")
         self.request = os.path.join(self.dir, "request.json")
         self.agent = os.path.join(self.dir, "agent")
@@ -54,7 +54,7 @@ class State:
         ignore = os.path.join(os.path.dirname(self.dir), ".gitignore")
         if not os.path.exists(ignore):
             with open(ignore, "w") as f:
-                f.write("# pdfloop review state\n*\n")
+                f.write("# texloop review state\n*\n")
 
     @contextlib.contextmanager
     def lock(self):
@@ -165,7 +165,7 @@ def make_handler(st, agent_name):
         def do_POST(self):
             if self.path == "/api/request":
                 # A request to the agent. The viewer never edits files or runs git;
-                # `pdfloop wait` on the agent side picks this file up.
+                # `texloop wait` on the agent side picks this file up.
                 action = self.body().get("action", "comments")
                 with st.lock():
                     n = sum(1 for c in st.load() if c.get("status") == "open")
@@ -225,7 +225,7 @@ def bind(st, port, agent_name):
             return ThreadingHTTPServer(("127.0.0.1", p), make_handler(st, agent_name))
         except OSError:
             continue
-    sys.exit(f"pdfloop: no free port in {port}..{port + 49}")
+    sys.exit(f"texloop: no free port in {port}..{port + 49}")
 
 
 def running_server(st):
@@ -251,7 +251,7 @@ def cmd_serve(a):
     httpd = bind(st, a.port, a.agent_name)
     port = httpd.server_address[1]
     write_json(st.server, {"port": port, "pid": os.getpid(), "pdf": st.pdf})
-    print(f"pdfloop: http://localhost:{port}  ({st.pdf})", flush=True)
+    print(f"texloop: http://localhost:{port}  ({st.pdf})", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -264,14 +264,14 @@ def cmd_serve(a):
 def cmd_open(a):
     st = State(a.pdf)
     if not os.path.exists(st.pdf):
-        print(f"pdfloop: {st.pdf} does not exist yet; the viewer will show it once it is built.",
+        print(f"texloop: {st.pdf} does not exist yet; the viewer will show it once it is built.",
               file=sys.stderr)
     url = running_server(st)
     if not url:
         st.ensure()
         with open(st.log, "w") as log:
             subprocess.Popen(
-                [sys.executable, "-m", "pdfloop", "serve", st.pdf, "--port", str(a.port),
+                [sys.executable, "-m", "texloop", "serve", st.pdf, "--port", str(a.port),
                  "--agent-name", a.agent_name],
                 stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
         for _ in range(50):
@@ -280,7 +280,7 @@ def cmd_open(a):
             if url:
                 break
         else:
-            sys.exit(f"pdfloop: server did not start, see {st.log}")
+            sys.exit(f"texloop: server did not start, see {st.log}")
     if not a.no_browser:
         open_browser(url, a.app)
     print(url)
@@ -306,7 +306,7 @@ def cmd_stop(a):
     st = State(a.pdf)
     info = read_json(st.server, None)
     if not info or not running_server(st):
-        print("pdfloop: no server running for this PDF")
+        print("texloop: no server running for this PDF")
         return
     os.kill(info["pid"], signal.SIGTERM)
     with contextlib.suppress(OSError):
@@ -356,7 +356,7 @@ def cmd_reply(a):
         items = st.load()
         hit = [c for c in items if c["id"] == a.id]
         if not hit:
-            sys.exit(f"pdfloop: no comment with id {a.id}")
+            sys.exit(f"texloop: no comment with id {a.id}")
         hit[0]["reply"] = text
         hit[0]["status"] = a.status
         hit[0]["replied"] = now()
@@ -378,14 +378,20 @@ def cmd_install_skill(a):
         base = os.path.join(os.getcwd(), ".claude", "skills")
     else:
         base = os.path.expanduser("~/.claude/skills")
-    dest = os.path.join(base, "pdfloop")
+    dest = os.path.join(base, "texloop")
     os.makedirs(dest, exist_ok=True)
     shutil.copy(os.path.join(HERE, "SKILL.md"), os.path.join(dest, "SKILL.md"))
     print(f"installed {os.path.join(dest, 'SKILL.md')}")
 
 
+def cmd_guide(a):
+    """Print the agent instructions, for harnesses without skill support."""
+    with open(os.path.join(HERE, "SKILL.md")) as f:
+        sys.stdout.write(f.read().split("---", 2)[2].lstrip())
+
+
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="pdfloop", description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(prog="texloop", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def pdf_cmd(name, fn, help):
@@ -397,8 +403,8 @@ def main(argv=None):
     for name, fn, help in (("open", cmd_open, "start the viewer for a PDF and open it in the browser"),
                            ("serve", cmd_serve, "run the viewer in the foreground")):
         s = pdf_cmd(name, fn, help)
-        s.add_argument("--port", type=int, default=int(os.environ.get("PDFLOOP_PORT", DEFAULT_PORT)))
-        s.add_argument("--agent-name", default=os.environ.get("PDFLOOP_AGENT", "Claude"),
+        s.add_argument("--port", type=int, default=int(os.environ.get("TEXLOOP_PORT", DEFAULT_PORT)))
+        s.add_argument("--agent-name", default=os.environ.get("TEXLOOP_AGENT", "Claude"),
                        help="name shown on the buttons (default: Claude)")
         if name == "open":
             s.add_argument("--no-browser", action="store_true", help="only start the server")
@@ -414,9 +420,10 @@ def main(argv=None):
     s.add_argument("--status", default="resolved", choices=STATUSES,
                    help="resolved: change made (default); answered: reply only, e.g. a question")
     pdf_cmd("done", cmd_done, "mark the current request as handled")
+    sub.add_parser("guide", help="print the instructions for the agent").set_defaults(fn=cmd_guide)
     s = sub.add_parser("install-skill", help="install the agent skill (default: ~/.claude/skills)")
     s.add_argument("--project", action="store_true", help="install into ./.claude/skills")
-    s.add_argument("--dir", help="install into DIR/pdfloop instead")
+    s.add_argument("--dir", help="install into DIR/texloop instead")
     s.set_defaults(fn=cmd_install_skill)
 
     a = p.parse_args(argv)
