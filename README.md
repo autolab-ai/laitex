@@ -1,6 +1,23 @@
+<div align="center">
+
 # pdfloop
 
-Review a PDF in your browser and send the comments straight to your coding agent.
+**Review a PDF in your browser. Your coding agent applies the comments.**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](pyproject.toml)
+[![Claude Code skill](https://img.shields.io/badge/Claude%20Code-skill-D97757)](pdfloop/SKILL.md)
+[![Works with LaTeX and Typst](https://img.shields.io/badge/LaTeX%20%7C%20Typst%20%7C%20any%20PDF-supported-555)](#how-the-agent-connects)
+[![GitHub stars](https://img.shields.io/github/stars/autolab-ai/pdfloop?style=social)](https://github.com/autolab-ai/pdfloop)
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/autolab-ai/pdfloop/main/install.sh | sh
+```
+
+[Quick start](#quick-start) · [Using the viewer](#using-the-viewer) · [How the agent connects](#how-the-agent-connects) · [Other agents](#other-agents)
+
+</div>
 
 You read the compiled PDF; the agent edits the LaTeX, Typst or Markdown source. Without a
 tool in between, every comment has to be copied out of the PDF, found again in the source
@@ -18,14 +35,21 @@ in place, at the spot you were reading.
 
 ## Quick start
 
-Install the command and the agent skill:
+Paste this into Claude Code (or any agent that can run shell commands):
 
-```sh
-uv tool install git+https://github.com/autolab-ai/pdfloop   # or: pipx install git+https://...
-pdfloop install-skill                                        # writes ~/.claude/skills/pdfloop/SKILL.md
+```text
+Install pdfloop from https://github.com/autolab-ai/pdfloop (run its install.sh),
+then open paper.pdf in it so I can review it.
 ```
 
-Then ask your agent:
+Or install it yourself with one command. It installs the `pdfloop` CLI with uv, pipx or pip
+and adds the skill to `~/.claude/skills`:
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/autolab-ai/pdfloop/main/install.sh | sh
+```
+
+After that, one sentence starts a review:
 
 > Open paper.pdf in pdfloop, I want to review it.
 
@@ -39,6 +63,13 @@ To try the viewer without an agent, open the example paper:
 ```sh
 git clone https://github.com/autolab-ai/pdfloop && cd pdfloop
 pdfloop open examples/paper/paper.pdf
+```
+
+Manual install, if you prefer it:
+
+```sh
+uv tool install git+https://github.com/autolab-ai/pdfloop   # or pipx install / pip install
+pdfloop install-skill
 ```
 
 ## Using the viewer
