@@ -1,7 +1,7 @@
 """texloop: review a PDF in the browser and hand the comments to a coding agent.
 
 The viewer and the agent share a small state folder next to the PDF
-(.texloop/<name>/). The viewer writes comments and requests there; the agent reads
+(.texloop-review/<name>/). The viewer writes comments and requests there; the agent reads
 them with `texloop wait` and answers with `texloop reply` and `texloop done`.
 The viewer itself never edits your files or runs git.
 """
@@ -41,7 +41,7 @@ class State:
     def __init__(self, pdf):
         self.pdf = os.path.abspath(pdf)
         stem = os.path.splitext(os.path.basename(self.pdf))[0]
-        self.dir = os.path.join(os.path.dirname(self.pdf), ".texloop", stem)
+        self.dir = os.path.join(os.path.dirname(self.pdf), ".texloop-review", stem)
         self.comments = os.path.join(self.dir, "comments.json")
         self.request = os.path.join(self.dir, "request.json")
         self.agent = os.path.join(self.dir, "agent")
@@ -271,7 +271,7 @@ def cmd_open(a):
         st.ensure()
         with open(st.log, "w") as log:
             subprocess.Popen(
-                [sys.executable, "-m", "texloop", "serve", st.pdf, "--port", str(a.port),
+                [sys.executable, os.path.abspath(__file__), "serve", st.pdf, "--port", str(a.port),
                  "--agent-name", a.agent_name],
                 stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
         for _ in range(50):
@@ -380,8 +380,12 @@ def cmd_install_skill(a):
         base = os.path.expanduser("~/.claude/skills")
     dest = os.path.join(base, "texloop")
     os.makedirs(dest, exist_ok=True)
-    shutil.copy(os.path.join(HERE, "SKILL.md"), os.path.join(dest, "SKILL.md"))
-    print(f"installed {os.path.join(dest, 'SKILL.md')}")
+    target = os.path.join(dest, "SKILL.md")
+    if os.path.lexists(target):
+        os.remove(target)
+    # A symlink, so `git pull` in the texloop checkout also updates the skill.
+    os.symlink(os.path.join(HERE, "SKILL.md"), target)
+    print(f"installed {target} -> {os.path.join(HERE, 'SKILL.md')}")
 
 
 def cmd_guide(a):

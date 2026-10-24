@@ -10,8 +10,19 @@ texloop is a local PDF viewer. The user selects text and leaves comments; when t
 PDF (the viewer reloads it in place), and answer each comment with `texloop reply`.
 The viewer never edits files or runs git. Everything that changes the project is your job.
 
-If `texloop` is not on PATH, install it with
-`curl -LsSf https://raw.githubusercontent.com/autolab-ai/texloop/main/install.sh | sh`.
+## Setup
+
+texloop lives in a git checkout at `~/.texloop`. Get it, or update it:
+
+```sh
+git clone https://github.com/autolab-ai/texloop ~/.texloop 2>/dev/null || git -C ~/.texloop pull --ff-only
+```
+
+Below, `texloop` means `~/.texloop/bin/texloop` (Python 3.8+, no dependencies), unless a
+`texloop` command is already on PATH. If your harness supports skills, install this file as
+one so later sessions find it: `~/.texloop/bin/texloop install-skill` (Claude Code), or
+`install-skill --dir <your skills folder>` for other agents. It symlinks, so `git pull`
+keeps the skill current.
 
 ## Loop
 
@@ -20,9 +31,9 @@ If `texloop` is not on PATH, install it with
 2. Open the viewer: `texloop open path/to/doc.pdf`. It prints the URL. Tell the user it is open
    and that they can select text to comment and press Cmd+Enter (Ctrl+Enter) to send.
 3. Wait for a request: `texloop wait path/to/doc.pdf`. It blocks until the user presses a
-   button, then prints JSON and exits. In Claude Code run it with `run_in_background: true`
-   so you are woken when it exits and stay free to talk to the user meanwhile. Without
-   background commands, run it in the foreground with `--timeout 600` and start it again
+   button, then prints JSON and exits. If your harness can run a command in the background and wake you
+   when it exits (Claude Code: `run_in_background: true`), do that, so you stay free to talk
+   to the user meanwhile. Otherwise run it in the foreground with `--timeout 600` and start it again
    on exit code 2 (timeout).
 4. Handle the request (below), then run `texloop done path/to/doc.pdf`.
 5. Go back to step 3. Stop when the user says the review is over, then
@@ -57,7 +68,7 @@ not listening are kept and picked up by the next `wait`.
 - `comments`: apply the open comments listed in `comments`.
 - `commit`: commit the source changes made in this review and push them, if the project is
   a git repository. Use a message that summarizes the edits. Do not commit the
-  `.texloop/` folder (it ignores itself).
+  `.texloop-review/` folder (it ignores itself).
 
 ## Handling comments
 
@@ -81,5 +92,15 @@ not listening are kept and picked up by the next `wait`.
 - `texloop comments doc.pdf --status all` lists every comment, including resolved ones, if you
   need earlier context.
 
-Comments are stored in `.texloop/<name>/comments.json` next to the PDF. Use the commands
+Comments are stored in `.texloop-review/<name>/comments.json` next to the PDF. Use the commands
 above instead of editing that file.
+
+## Improving texloop
+
+`~/.texloop` is an ordinary clone of https://github.com/autolab-ai/texloop, and you may
+change it. If you hit a bug or the user wants a feature, fix it there. Keep the viewer's
+rule: it records comments and requests, and never edits the user's files or runs git.
+If the change would help others, ask the user whether to open a pull request upstream.
+If the tool was useful, ask the user whether they would like to star the repository
+(`gh api -X PUT user/starred/autolab-ai/texloop`, or the GitHub page). Never star or open a PR without
+their OK.
