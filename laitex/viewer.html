@@ -143,6 +143,10 @@ function layout() {
 
 // ---- links: internal destinations (sections, citations, equations) and URLs ----
 const tip = document.getElementById("tip"), backBtn = document.getElementById("back");
+// The link under the cursor. The preview is built asynchronously, so it is only shown if the
+// cursor is still on the same link when it is ready; otherwise it would stay on screen.
+let hoverLink = null;
+function hideTip() { hoverLink = null; tip.style.display = "none"; }
 const history_ = [];
 async function resolveDest(d, dest) {
   const explicit = typeof dest === "string" ? await d.getDestination(dest) : dest;
@@ -182,19 +186,20 @@ async function buildLinks(div, page, d) {
     if (an.url) { a.href = an.url; a.target = "_blank"; a.title = an.url; }
     else if (an.dest) {
       let target = null;
-      a.onclick = async ev => { ev.preventDefault(); target = target || await resolveDest(d, an.dest); if (target) goTo(target); tip.style.display = "none"; };
+      a.onclick = async ev => { ev.preventDefault(); hideTip(); target = target || await resolveDest(d, an.dest); if (target) goTo(target); };
       a.onmouseenter = async ev => {
+        hoverLink = a;
         target = target || await resolveDest(d, an.dest);
-        if (!target || d !== doc) return;
+        if (!target || d !== doc || hoverLink !== a) return;
         const txt = await previewText(d, target);
-        if (!txt) return;
+        if (!txt || hoverLink !== a || !a.isConnected) return;
         tip.textContent = txt;
         const r = a.getBoundingClientRect();
         tip.style.left = Math.min(r.left, window.innerWidth - 480) + "px";
         tip.style.top = (r.bottom + 6 + 120 > window.innerHeight ? r.top - 130 : r.bottom + 6) + "px";
         tip.style.display = "block";
       };
-      a.onmouseleave = () => { tip.style.display = "none"; };
+      a.onmouseleave = hideTip;
     }
     layer.appendChild(a);
   }
@@ -283,6 +288,7 @@ async function loadDoc() {
     }
     holder.remove();
     if (g !== gen) return;
+    hideTip();  // the hovered link is about to be replaced and will not get a mouseleave
     pagesEl.replaceChildren(...fresh);
     layout(); restore(a);
     drawHighlights();
@@ -307,7 +313,7 @@ function setZoom(z) {
   clearTimeout(zoomTimer); zoomTimer = setTimeout(renderVisible, 150);
 }
 let scrollTimer;
-main.addEventListener("scroll", () => { clearTimeout(scrollTimer); scrollTimer = setTimeout(renderVisible, 80); });
+main.addEventListener("scroll", () => { hideTip(); clearTimeout(scrollTimer); scrollTimer = setTimeout(renderVisible, 80); });
 
 function drawHighlights() {
   pagesEl.querySelectorAll(".hl").forEach(h => h.replaceChildren());
@@ -401,6 +407,7 @@ function contextOf(pageEl, quote) {
   if (i < 0) return "";
   return txt.slice(Math.max(0, i - 150), i) + "[[" + quote + "]]" + txt.slice(i + quote.length, i + quote.length + 150);
 }
+document.addEventListener("mousedown", hideTip);
 document.addEventListener("mouseup", ev => {
   pagesEl.querySelectorAll(".textLayer.selecting").forEach(t => t.classList.remove("selecting"));
   if (pop.contains(ev.target)) return;
