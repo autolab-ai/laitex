@@ -11,7 +11,7 @@
 [![Works with LaTeX and Typst](https://img.shields.io/badge/LaTeX%20%7C%20Typst%20%7C%20any%20PDF-supported-555)](#how-the-agent-connects)
 [![GitHub stars](https://img.shields.io/github/stars/autolab-ai/texloop?style=social)](https://github.com/autolab-ai/texloop)
 
-**Paste this into your coding agent** (the copy button is in the corner of the box):
+**Paste this into your coding agent:**
 
 </div>
 
