@@ -1,0 +1,91 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1.1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!60!black,citecolor=green!40!black,urlcolor=blue!60!black]{hyperref}
+
+\title{Reviewing Documents with a Coding Agent}
+\author{The pdfloop example paper}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Writing a paper with a coding agent is fast until the review step. The author reads the
+compiled PDF, but the agent edits the source, so every comment has to be copied out of the
+PDF, located in the source and explained again in a chat window. This example paper exists
+to be reviewed with pdfloop: open it, select a sentence, leave a comment, and send it to
+your agent.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Most technical documents are written in a markup language and read as a PDF. LaTeX
+\cite{lamport1994latex} and Typst \cite{typst} both separate the two: the author edits
+plain text, a compiler produces pages. Coding agents are good at the first half. They can
+restructure a section, fix notation everywhere, or rewrite a paragraph in a different tone.
+They cannot see what the reader sees.
+
+The review loop closes that gap. The reader comments on the rendered page, the agent
+receives each comment with the quoted text and its surroundings, edits the source,
+rebuilds, and replies. Section~\ref{sec:loop} describes the loop and
+Section~\ref{sec:cost} estimates what it saves.
+
+\section{The review loop}
+\label{sec:loop}
+
+A review round has four steps. The reader selects text and writes a comment. The reader
+sends all open comments at once. The agent applies them and rebuilds the PDF. The viewer
+reloads the new PDF at the same position, and each comment shows the agent's reply.
+
+The viewer never touches the project. It only records comments and requests; the agent
+decides what to change, and the reader can ask it to commit when the round is done.
+Table~\ref{tab:roles} lists who does what.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+Step & Reader & Agent \\
+\midrule
+Comment & selects text, writes a note & \\
+Send & presses Cmd+Enter & wakes up \\
+Apply & & edits source, rebuilds \\
+Reply & reads the reply in place & writes one reply per comment \\
+\bottomrule
+\end{tabular}
+\caption{Division of work in one review round.}
+\label{tab:roles}
+\end{table}
+
+\section{What it saves}
+\label{sec:cost}
+
+Let $n$ be the number of comments in a round, $t_c$ the time to write one comment, and
+$t_l$ the time to locate the commented text in the source and describe it to the agent.
+Reviewing in a chat window costs
+\begin{equation}
+T_{\text{chat}} = n\,(t_c + t_l),
+\label{eq:chat}
+\end{equation}
+while reviewing on the page costs $T_{\text{page}} = n\,t_c$, because the quote and its
+context travel with the comment. For a round of twenty comments with $t_l = 30$\,s,
+Equation~\eqref{eq:chat} gives ten minutes spent only on pointing at text.
+
+\section{Conclusion}
+
+Comment where you read, edit where you write, and let the agent move between the two.
+PDF.js \cite{pdfjs} renders the pages; the rest is a small Python server and a
+skill file that tells the agent how to take part.
+
+\begin{thebibliography}{9}
+\bibitem{lamport1994latex} Leslie Lamport. \emph{\LaTeX: A Document Preparation System}.
+Addison-Wesley, 2nd edition, 1994.
+\bibitem{typst} Typst. \url{https://typst.app}.
+\bibitem{pdfjs} Mozilla. PDF.js. \url{https://mozilla.github.io/pdf.js/}.
+\end{thebibliography}
+
+\end{document}

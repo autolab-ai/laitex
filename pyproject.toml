@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdfloop"
+version = "0.1.0"
+description = "Review a PDF in your browser and send the comments to your coding agent"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+authors = [{ name = "AutoLab" }]
+keywords = ["pdf", "review", "latex", "claude-code", "agent", "skill"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Text Processing :: Markup :: LaTeX",
+]
+
+[project.urls]
+Homepage = "https://github.com/autolab-ai/pdfloop"
+
+[project.scripts]
+pdfloop = "pdfloop.cli:main"
+
+[tool.setuptools]
+packages = ["pdfloop"]
+
+[tool.setuptools.package-data]
+pdfloop = ["viewer.html", "SKILL.md"]

@@ -1,0 +1,516 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>pdfloop</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root { --side: 340px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: #e9e9ec; color: #222; }
+  #main { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); overflow-y: auto; }
+  #pages { padding: 16px 20px 60vh; min-width: fit-content; }
+  .page { position: relative; margin: 0 auto 14px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  .page canvas { display: block; width: 100%; height: 100%; }
+  .hl { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+  .hl div { position: absolute; background: rgba(255, 210, 0, .38); border-radius: 2px; }
+  .hl div.resolved { background: rgba(120, 120, 120, .15); }
+  .hl div.answered { background: rgba(80, 140, 255, .22); }
+  .hl div.active { background: rgba(255, 140, 0, .55); }
+  .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; z-index: 2;
+               text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; }
+  .textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre;
+               cursor: text; transform-origin: 0% 0%; }
+  .textLayer ::selection { background: rgba(0, 90, 255, .28); }
+  .links { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .links a { position: absolute; pointer-events: auto; cursor: pointer; border-radius: 2px; }
+  .links a:hover { background: rgba(0, 90, 255, .12); }
+  #tip { position: fixed; display: none; z-index: 20; max-width: 460px; background: #fffef4; border: 1px solid #ccb;
+         border-radius: 6px; box-shadow: 0 3px 12px rgba(0,0,0,.2); padding: 8px 10px; font-size: 12px; line-height: 1.45; }
+  #back { position: fixed; left: 12px; bottom: 12px; z-index: 15; display: none; }
+  #side { position: fixed; right: 0; top: 0; bottom: 0; width: var(--side); display: flex;
+          flex-direction: column; background: #fafafa; border-left: 1px solid #ccc; padding: 10px; }
+  #list { flex: 1; overflow-y: auto; min-height: 0; }
+  #keys { flex: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; }
+  #keys kbd { font: 11px ui-monospace, monospace; background: #fff; border: 1px solid #ccc;
+              border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+  #side h2 { font-size: 14px; margin: 4px 0 8px; display: flex; justify-content: space-between; align-items: center; }
+  #status { font-size: 11px; color: #777; font-weight: normal; }
+  #docname { font-size: 12px; color: #555; margin: -4px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #agent { font-size: 11px; color: #777; margin: -2px 0 8px; }
+  #agent i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #bbb; margin-right: 5px; }
+  #agent.on i { background: #2a9d4b; }
+  .c { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px; margin-bottom: 8px; cursor: pointer; }
+  .c.resolved { opacity: .55; }
+  .c.answered { border-color: #9bb8e8; }
+  .c .q { color: #666; font-style: italic; border-left: 3px solid #f2c500; padding-left: 6px; margin-bottom: 4px;
+          max-height: 3.9em; overflow: hidden; }
+  .c .t { white-space: pre-wrap; }
+  .c .r { white-space: pre-wrap; margin-top: 6px; padding: 6px; background: #eef4ff; border-radius: 4px; }
+  .c .meta { font-size: 11px; color: #999; margin-top: 4px; display: flex; gap: 8px; }
+  .c .meta a { color: #36c; cursor: pointer; }
+  #pop { position: fixed; display: none; z-index: 10; width: 320px; background: #fff; border: 1px solid #bbb;
+         border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.2); padding: 8px; }
+  #pop textarea { width: 100%; height: 90px; font: inherit; }
+  #pop .btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+  button { font: inherit; padding: 3px 10px; }
+  label { font-size: 11px; color: #555; font-weight: normal; }
+</style>
+</head>
+<body>
+<div id="main"><div id="pages"></div></div>
+<div id="side">
+  <h2>Comments <span id="status">loading</span></h2>
+  <div id="docname"></div>
+  <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+    <button id="zoomOut" title="Cmd -">&minus;</button>
+    <span id="zoomLabel" style="min-width:42px;text-align:center">100%</span>
+    <button id="zoomIn" title="Cmd +">+</button>
+    <button id="zoomFit" title="Cmd 0">fit</button>
+  </div>
+  <button id="sendBtn" style="width:100%;margin-bottom:6px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Send comments</button>
+  <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:#fff;color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
+  <div id="agent"><i></i><span>agent not listening</span></div>
+  <label><input type="checkbox" id="showResolved"> show resolved</label>
+  <div id="list" style="margin-top:8px"></div>
+  <details id="keys" open style="font-size:12px;color:#555">
+    <summary style="cursor:pointer;font-weight:600">How to use</summary>
+    <table style="margin-top:6px;border-collapse:collapse">
+      <tr><td style="padding:2px 8px 2px 0">select text</td><td>open the comment box</td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Enter</kbd></td><td>save the comment</td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Shift+Enter</kbd></td><td>new line in a comment</td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Esc</kbd></td><td>cancel / clear selection</td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Enter</kbd></td><td>send open comments to <span class="an">the agent</span></td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd + / &minus; / 0</kbd></td><td>zoom in / out / fit (or pinch)</td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Alt+&larr;</kbd></td><td>back after following a link</td></tr>
+    </table>
+  </details>
+</div>
+<div id="tip"></div>
+<button id="back" title="Back (Alt+Left)">&larr; back</button>
+<div id="pop">
+  <textarea id="popText" placeholder="Enter: save · Shift+Enter: new line · Cmd+Enter: save and send · Esc: cancel"></textarea>
+  <div class="btns"><button id="popCancel">Cancel</button><button id="popSave">Save</button></div>
+</div>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const main = document.getElementById("main");
+const pagesEl = document.getElementById("pages");
+const statusEl = document.getElementById("status");
+let mtime = null, comments = [], loading = false, pending = null, activeId = null, editing = null;
+let agentName = "Claude", request_ = null;
+let doc = null, sizes = [], gen = 0;  // sizes: unscaled page sizes in PDF points
+
+let zoom = 1;
+try { zoom = parseFloat(localStorage.getItem("zoom")) || 1; } catch (e) {}
+function fitWidth() { return Math.max(500, Math.min((main.clientWidth || window.innerWidth - 340) - 40, 1100)); }
+function scaleFor(n) { return fitWidth() * zoom / sizes[n - 1].w; }
+
+function anchor() {
+  const pages = pagesEl.children, top = main.scrollTop;
+  for (let i = 0; i < pages.length; i++) {
+    const p = pages[i];
+    if (p.offsetTop + p.offsetHeight > top) return { i, f: (top - p.offsetTop) / p.offsetHeight };
+  }
+  return { i: 0, f: 0 };
+}
+function restore(a) {
+  const p = pagesEl.children[a.i];
+  if (p) main.scrollTop = p.offsetTop + a.f * p.offsetHeight;
+}
+
+// Resize page boxes to the current zoom. The old canvas is stretched until it is
+// re-rendered, and the text layer follows the --scale-factor variable, so this is instant.
+function layout() {
+  const a = anchor();
+  for (const div of pagesEl.children) {
+    const n = +div.dataset.page, sc = scaleFor(n);
+    div.style.width = sizes[n - 1].w * sc + "px";
+    div.style.height = sizes[n - 1].h * sc + "px";
+    div.style.setProperty("--scale-factor", sc);
+  }
+  restore(a);
+}
+
+// ---- links: internal destinations (sections, citations, equations) and URLs ----
+const tip = document.getElementById("tip"), backBtn = document.getElementById("back");
+const history_ = [];
+async function resolveDest(d, dest) {
+  const explicit = typeof dest === "string" ? await d.getDestination(dest) : dest;
+  if (!explicit) return null;
+  const pageIndex = await d.getPageIndex(explicit[0]);
+  const y = explicit[1] && explicit[1].name === "XYZ" ? explicit[3] : null;
+  return { n: pageIndex + 1, y };
+}
+function goTo(t) {
+  const div = pagesEl.children[t.n - 1];
+  if (!div) return;
+  const fy = t.y == null ? 0 : 1 - t.y / sizes[t.n - 1].h;
+  history_.push(main.scrollTop); backBtn.style.display = "block";
+  main.scrollTop = div.offsetTop + fy * div.offsetHeight - 60;
+}
+backBtn.onclick = () => { if (history_.length) main.scrollTop = history_.pop(); if (!history_.length) backBtn.style.display = "none"; };
+window.addEventListener("keydown", e => { if (e.altKey && e.key === "ArrowLeft") backBtn.onclick(); });
+async function previewText(d, t) {
+  const page = await d.getPage(t.n);
+  const tc = await page.getTextContent();
+  const y0 = t.y == null ? sizes[t.n - 1].h : t.y;
+  const items = tc.items.filter(it => it.str && it.transform[5] <= y0 + 2 && it.transform[5] > y0 - 46);
+  items.sort((a, b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]);
+  let txt = "", lastY = null;
+  for (const it of items) { if (lastY !== null && Math.abs(it.transform[5] - lastY) > 2) txt += " "; txt += it.str; lastY = it.transform[5]; }
+  return txt.replace(/\s+/g, " ").trim().slice(0, 400);
+}
+async function buildLinks(div, page, d) {
+  const layer = document.createElement("div"); layer.className = "links"; div.appendChild(layer);
+  const W = sizes[+div.dataset.page - 1].w, H = sizes[+div.dataset.page - 1].h;
+  for (const an of await page.getAnnotations()) {
+    if (an.subtype !== "Link" || !an.rect) continue;
+    const [x1, y1, x2, y2] = an.rect;
+    const a = document.createElement("a");
+    a.style.left = x1 / W * 100 + "%"; a.style.top = (1 - y2 / H) * 100 + "%";
+    a.style.width = (x2 - x1) / W * 100 + "%"; a.style.height = (y2 - y1) / H * 100 + "%";
+    if (an.url) { a.href = an.url; a.target = "_blank"; a.title = an.url; }
+    else if (an.dest) {
+      let target = null;
+      a.onclick = async ev => { ev.preventDefault(); target = target || await resolveDest(d, an.dest); if (target) goTo(target); tip.style.display = "none"; };
+      a.onmouseenter = async ev => {
+        target = target || await resolveDest(d, an.dest);
+        if (!target || d !== doc) return;
+        const txt = await previewText(d, target);
+        if (!txt) return;
+        tip.textContent = txt;
+        const r = a.getBoundingClientRect();
+        tip.style.left = Math.min(r.left, window.innerWidth - 480) + "px";
+        tip.style.top = (r.bottom + 6 + 120 > window.innerHeight ? r.top - 130 : r.bottom + 6) + "px";
+        tip.style.display = "block";
+      };
+      a.onmouseleave = () => { tip.style.display = "none"; };
+    }
+    layer.appendChild(a);
+  }
+}
+
+function makePage(n) {
+  const div = document.createElement("div");
+  div.className = "page"; div.dataset.page = n; div.dataset.scale = "0";
+  const canvas = document.createElement("canvas"); div.appendChild(canvas);
+  const hl = document.createElement("div"); hl.className = "hl"; div.appendChild(hl);
+  const tl = document.createElement("div"); tl.className = "textLayer"; div.appendChild(tl);
+  return div;
+}
+
+async function renderPage(div, d, g) {
+  const n = +div.dataset.page, sc = scaleFor(n);
+  if (Math.abs(+div.dataset.scale - sc) < 1e-3) return;
+  const page = await d.getPage(n);
+  const vp = page.getViewport({ scale: sc }), dpr = window.devicePixelRatio || 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.floor(vp.width * dpr); canvas.height = Math.floor(vp.height * dpr);
+  // print intent avoids requestAnimationFrame stalls in background windows
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp,
+                      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null, intent: "print" }).promise;
+  if (g !== gen) return;
+  div.replaceChild(canvas, div.querySelector("canvas"));
+  if (div.dataset.text !== "1") {
+    const tl = div.querySelector(".textLayer");
+    await pdfjsLib.renderTextLayer({ textContentSource: await page.getTextContent(), container: tl,
+                                     viewport: vp, textDivs: [] }).promise;
+    div.dataset.text = "1";
+    await buildLinks(div, page, d);
+  }
+  div.dataset.scale = sc;
+}
+
+// Render the pages near the viewport, nearest first.
+let renderQueued = false;
+async function renderVisible() {
+  if (renderQueued || !doc) return;
+  renderQueued = true;
+  const g = gen, d = doc;
+  try {
+    const h = main.clientHeight || window.innerHeight || 800;
+    const top = main.scrollTop - h, bottom = main.scrollTop + 2 * h;
+    const mid = main.scrollTop + h / 2;
+    const near = [...pagesEl.children]
+      .filter(p => p.offsetTop + p.offsetHeight > top && p.offsetTop < bottom)
+      .sort((a, b) => Math.abs(a.offsetTop + a.offsetHeight / 2 - mid) - Math.abs(b.offsetTop + b.offsetHeight / 2 - mid));
+    for (const p of near) { if (g !== gen) break; await renderPage(p, d, g); }
+  } finally {
+    renderQueued = false;
+    if (g !== gen) setTimeout(renderVisible, 0);  // zoom changed meanwhile
+  }
+}
+
+// Load a (new) PDF: build the new pages off-screen, render the ones at the reading
+// position, then swap them in so the view does not jump or flash.
+async function loadDoc() {
+  if (loading) return;
+  loading = true;
+  try {
+    const a = anchor();
+    const d = await pdfjsLib.getDocument({ url: "/pdf?t=" + Date.now() }).promise;
+    const sz = [];
+    for (let n = 1; n <= d.numPages; n++) {
+      const v = (await d.getPage(n)).getViewport({ scale: 1 });
+      sz.push({ w: v.width, h: v.height });
+    }
+    const g = ++gen;
+    doc = d; sizes = sz;
+    const fresh = [];
+    for (let n = 1; n <= d.numPages; n++) fresh.push(makePage(n));
+    const focus = [a.i, a.i + 1, a.i - 1].filter(i => i >= 0 && i < fresh.length);
+    const holder = document.createElement("div");
+    holder.style.cssText = "position:absolute;left:-99999px;top:0";
+    document.body.appendChild(holder);
+    for (const i of focus) {
+      holder.appendChild(fresh[i]);
+      const n = i + 1, sc = scaleFor(n);
+      fresh[i].style.setProperty("--scale-factor", sc);
+      fresh[i].style.width = sz[i].w * sc + "px"; fresh[i].style.height = sz[i].h * sc + "px";
+      await renderPage(fresh[i], d, g);
+    }
+    holder.remove();
+    if (g !== gen) return;
+    pagesEl.replaceChildren(...fresh);
+    layout(); restore(a);
+    drawHighlights();
+    statusEl.textContent = "updated " + new Date().toLocaleTimeString();
+    renderVisible();
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = "PDF not ready, retrying";
+    mtime = null;
+  } finally {
+    loading = false;
+  }
+}
+
+let zoomTimer;
+function setZoom(z) {
+  zoom = Math.min(4, Math.max(0.4, z));
+  try { localStorage.setItem("zoom", zoom); } catch (e) {}
+  document.getElementById("zoomLabel").textContent = Math.round(zoom * 100) + "%";
+  gen++;            // cancel renders at the old size
+  layout();         // instant preview
+  clearTimeout(zoomTimer); zoomTimer = setTimeout(renderVisible, 150);
+}
+let scrollTimer;
+main.addEventListener("scroll", () => { clearTimeout(scrollTimer); scrollTimer = setTimeout(renderVisible, 80); });
+
+function drawHighlights() {
+  pagesEl.querySelectorAll(".hl").forEach(h => h.replaceChildren());
+  const all = pending ? [...comments, { ...pending, id: "__pending", status: "pending" }] : comments;
+  for (const c of all) {
+    // Resolved text has usually been rewritten, so its old boxes are only drawn when selected.
+    if (c.status === "resolved" && c.id !== activeId) continue;
+    const hl = pagesEl.querySelector(`.page[data-page="${c.page}"] .hl`);
+    if (!hl) continue;
+    for (const r of c.rects || []) {
+      const d = document.createElement("div");
+      d.style.left = r[0] * 100 + "%"; d.style.top = r[1] * 100 + "%";
+      d.style.width = r[2] * 100 + "%"; d.style.height = r[3] * 100 + "%";
+      if (c.status === "resolved" || c.status === "answered") d.className = c.status;
+      if (c.id === activeId || c.status === "pending") d.className = "active";
+      hl.appendChild(d);
+    }
+  }
+}
+
+function esc(s) { return (s || "").replace(/[&<>]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch])); }
+
+function drawList() {
+  const show = document.getElementById("showResolved").checked;
+  const list = document.getElementById("list");
+  const items = comments.filter(c => show || c.status !== "resolved")
+    .sort((a, b) => (a.status === "resolved") - (b.status === "resolved") || a.page - b.page);
+  updateSendBtn();
+  list.innerHTML = items.length ? "" : "<div style='color:#888'>Select text in the PDF to add a comment.</div>";
+  for (const c of items) {
+    const el = document.createElement("div");
+    el.className = "c " + c.status;
+    el.innerHTML = `<div class="q">${esc(c.quote)}</div><div class="t">${esc(c.comment)}</div>` +
+      (c.reply ? `<div class="r">${esc(c.reply)}</div>` : "") +
+      `<div class="meta">p.${c.page} · ${c.status}` +
+      ` <a data-act="toggle">${c.status === "resolved" ? "reopen" : "resolve"}</a>` +
+      ` <a data-act="edit">edit</a> <a data-act="del">delete</a></div>`;
+    el.onclick = async ev => {
+      const act = ev.target.dataset && ev.target.dataset.act;
+      if (act === "toggle") {
+        await fetch("/api/comments/" + c.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: c.status === "resolved" ? "open" : "resolved" }) });
+        return loadComments();
+      }
+      if (act === "edit") { ev.stopPropagation(); return openPop(el.getBoundingClientRect(), c); }
+      if (act === "del") {
+        if (confirm("Delete this comment?")) { await fetch("/api/comments/" + c.id, { method: "DELETE" }); loadComments(); }
+        return;
+      }
+      activeId = c.id; drawHighlights();
+      const p = pagesEl.querySelector(`.page[data-page="${c.page}"]`);
+      if (p) {
+        const y = c.rects && c.rects.length ? c.rects[0][1] : 0;
+        main.scrollTo({ top: p.offsetTop + y * p.offsetHeight - 120, behavior: "smooth" });
+      }
+    };
+    list.appendChild(el);
+  }
+}
+
+let lastCommentsJson = "";
+async function loadComments() {
+  const r = await fetch("/api/comments"); const txt = await r.text();
+  if (txt !== lastCommentsJson) { lastCommentsJson = txt; comments = JSON.parse(txt); drawList(); drawHighlights(); }
+}
+document.getElementById("showResolved").onchange = () => { drawList(); drawHighlights(); };
+
+// selection -> comment popup
+const pop = document.getElementById("pop"), popText = document.getElementById("popText");
+function openPop(r, edit) {
+  editing = edit || null;
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 340)) + "px";
+  pop.style.top = Math.min(r.bottom + 6, window.innerHeight - 160) + "px";
+  pop.style.display = "block"; popText.value = edit ? edit.comment : "";
+  drawHighlights();  // keep the selected text marked while typing
+  popText.focus();
+}
+// A little text around the selection, so the agent can find short quotes in the source.
+function contextOf(pageEl, quote) {
+  // Join the text layer's spans, with a space wherever a new line starts.
+  let txt = "", lastTop = null;
+  for (const n of pageEl.querySelector(".textLayer").children) {
+    if (n.nodeName !== "SPAN") { txt += " "; continue; }
+    const top = n.offsetTop;
+    if (lastTop !== null && Math.abs(top - lastTop) > n.offsetHeight / 2) txt += " ";
+    txt += n.textContent; lastTop = top;
+  }
+  txt = txt.replace(/\s+/g, " ");
+  let i = txt.indexOf(quote);
+  if (i < 0) i = txt.indexOf(quote.slice(0, 40));
+  if (i < 0) return "";
+  return txt.slice(Math.max(0, i - 150), i) + "[[" + quote + "]]" + txt.slice(i + quote.length, i + quote.length + 150);
+}
+document.addEventListener("mouseup", ev => {
+  if (pop.contains(ev.target)) return;
+  setTimeout(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const node = range.commonAncestorContainer;
+    const pageEl = (node.nodeType === 1 ? node : node.parentElement).closest(".page");
+    if (!pageEl) return;
+    const pr = pageEl.getBoundingClientRect();
+    const rects = [...range.getClientRects()].filter(r => r.width > 1 && r.height > 1)
+      .map(r => [(r.left - pr.left) / pr.width, (r.top - pr.top) / pr.height, r.width / pr.width, r.height / pr.height]);
+    if (!rects.length) return;
+    const quote = sel.toString().replace(/\s+/g, " ").trim();
+    pending = { page: +pageEl.dataset.page, quote, context: contextOf(pageEl, quote), rects };
+    openPop(range.getBoundingClientRect());
+  }, 0);
+});
+function closePop() { pop.style.display = "none"; pending = null; editing = null; drawHighlights(); }
+document.getElementById("popCancel").onclick = closePop;
+async function savePop() {
+  const text = popText.value.trim();
+  if (editing) {
+    // Editing a comment reopens it, so it goes to the agent again with the next send.
+    if (text) await fetch("/api/comments/" + editing.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment: text, status: "open" }) });
+    closePop(); return loadComments();
+  }
+  if (!pending || !text) return closePop();
+  await fetch("/api/comments", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...pending, comment: text }) });
+  closePop(); window.getSelection().removeAllRanges(); loadComments();
+}
+document.getElementById("popSave").onclick = savePop;
+// In the comment box: Enter saves, Shift+Enter adds a new line, Cmd+Enter saves and
+// sends all open comments, Esc cancels.
+popText.addEventListener("keydown", async e => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); await savePop(); sendComments(); }
+  else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); savePop(); }
+  else if (e.key === "Escape") { e.stopPropagation(); closePop(); window.getSelection().removeAllRanges(); }
+});
+// Elsewhere: Esc clears the selection, Cmd+Enter sends all open comments.
+window.addEventListener("keydown", e => {
+  if (e.target === popText) return;
+  if (e.key === "Escape") { closePop(); window.getSelection().removeAllRanges(); }
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey) { e.preventDefault(); askCommit(); return; }
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendComments(); }
+});
+
+// Poll for a rebuilt PDF, new replies and the agent's state.
+async function poll() {
+  try {
+    const st = await (await fetch("/api/state")).json();
+    if (st.name && document.title !== st.name) {
+      document.title = st.name; document.getElementById("docname").textContent = st.name;
+      document.getElementById("docname").title = st.pdf;
+    }
+    agentName = st.agent_name || "Claude";
+    document.querySelectorAll(".an").forEach(s => s.textContent = agentName);
+    request_ = st.request;
+    const ag = document.getElementById("agent");
+    ag.className = st.listening ? "on" : "";
+    ag.querySelector("span").textContent = st.listening ? agentName + " is listening" : agentName + " is not listening";
+    ag.title = st.listening ? "" : "Ask your agent to review this PDF with pdfloop; requests wait here until it does.";
+    updateSendBtn();
+    const m = st.mtime;
+    if (m && m !== mtime && pop.style.display !== "block") {
+      const first = mtime === null; mtime = m;
+      await loadDoc(); if (first) loadComments();
+    } else if (!m) statusEl.textContent = "waiting for the PDF";
+    await loadComments();
+    renderVisible();  // safety net in case a scroll event was missed
+  } catch (e) { statusEl.textContent = "server offline"; }
+  setTimeout(poll, 1500);
+}
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { gen++; layout(); renderVisible(); }, 200); });
+document.getElementById("zoomIn").onclick = () => setZoom(zoom * 1.2);
+document.getElementById("zoomOut").onclick = () => setZoom(zoom / 1.2);
+document.getElementById("zoomFit").onclick = () => setZoom(1);
+document.getElementById("zoomLabel").textContent = Math.round(zoom * 100) + "%";
+// Cmd/Ctrl +/-/0 and trackpad pinch re-render the PDF sharply instead of scaling pixels.
+window.addEventListener("keydown", e => {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  if (e.key === "=" || e.key === "+") { e.preventDefault(); setZoom(zoom * 1.2); }
+  else if (e.key === "-") { e.preventDefault(); setZoom(zoom / 1.2); }
+  else if (e.key === "0") { e.preventDefault(); setZoom(1); }
+});
+main.addEventListener("wheel", e => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  setZoom(zoom * Math.exp(-e.deltaY * 0.01));
+}, { passive: false });
+const sendBtn = document.getElementById("sendBtn");
+const commitBtn = document.getElementById("commitBtn");
+function updateSendBtn() {
+  const n = comments.filter(c => c.status === "open").length, t = request_;
+  sendBtn.textContent = t && t.action === "comments" ? `Sent, ${agentName} is working…`
+    : `Send ${n} open comment${n === 1 ? "" : "s"} to ${agentName}`;
+  commitBtn.textContent = t && t.action === "commit" ? `Commit requested, ${agentName} is working…`
+    : `Ask ${agentName} to commit and push`;
+  sendBtn.disabled = !!t || n === 0; sendBtn.style.opacity = sendBtn.disabled ? .5 : 1;
+  commitBtn.disabled = !!t; commitBtn.style.opacity = t ? .5 : 1;
+}
+// Both buttons only leave a request for the agent; the viewer never edits files or runs git.
+async function request(action) {
+  request_ = await (await fetch("/api/request", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                  body: JSON.stringify({ action }) })).json();
+  updateSendBtn();
+}
+async function sendComments() {
+  if (!comments.some(c => c.status === "open")) await loadComments();
+  if (!comments.some(c => c.status === "open")) return;
+  request("comments");
+}
+function askCommit() { request("commit"); }
+sendBtn.onclick = sendComments;
+commitBtn.onclick = askCommit;
+poll();
+</script>
+</body>
+</html>
