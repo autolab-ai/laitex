@@ -16,9 +16,11 @@
 </div>
 
 ```text
-Use texloop (https://github.com/autolab-ai/texloop) to get my feedback on paper.pdf.
-Clone it to ~/.texloop, or `git -C ~/.texloop pull` if it is already there, then read
-~/.texloop/texloop/SKILL.md and follow it: open paper.pdf in texloop and wait for my comments.
+Use texloop to get my feedback on paper.pdf.
+Clone https://github.com/autolab-ai/texloop to ~/.texloop
+(or git -C ~/.texloop pull if it is there), then read
+~/.texloop/texloop/SKILL.md and follow it:
+open paper.pdf in texloop and wait for my comments.
 ```
 
 <div align="center">
@@ -47,9 +49,11 @@ Copy this prompt into your coding agent (Claude Code, Codex, Cursor, opencode, A
 other agent that can run shell commands) and replace `paper.pdf` with your file:
 
 ```text
-Use texloop (https://github.com/autolab-ai/texloop) to get my feedback on paper.pdf.
-Clone it to ~/.texloop, or `git -C ~/.texloop pull` if it is already there, then read
-~/.texloop/texloop/SKILL.md and follow it: open paper.pdf in texloop and wait for my comments.
+Use texloop to get my feedback on paper.pdf.
+Clone https://github.com/autolab-ai/texloop to ~/.texloop
+(or git -C ~/.texloop pull if it is there), then read
+~/.texloop/texloop/SKILL.md and follow it:
+open paper.pdf in texloop and wait for my comments.
 ```
 
 There is nothing else to install. The agent clones the repository, reads the instructions,
