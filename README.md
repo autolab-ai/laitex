@@ -102,6 +102,7 @@ build it.
 | select text | open the comment box |
 | Enter | save the comment |
 | Shift+Enter | new line in a comment |
+| Cmd+C | copy the selected text (also the Copy text button) |
 | Esc | cancel the comment or clear the selection |
 | Cmd+Enter | send all open comments to the agent |
 | Cmd+Shift+Enter | ask the agent to commit and push |

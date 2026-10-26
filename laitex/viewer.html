@@ -59,6 +59,7 @@
          border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.2); padding: 8px; }
   #pop textarea { width: 100%; height: 90px; font: inherit; }
   #pop .btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+  #pop #popCopy { margin-right: auto; }
   button { font: inherit; padding: 3px 10px; }
   label { font-size: 11px; color: #555; font-weight: normal; }
 </style>
@@ -85,6 +86,7 @@
       <tr><td style="padding:2px 8px 2px 0">select text</td><td>open the comment box</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Enter</kbd></td><td>save the comment</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Shift+Enter</kbd></td><td>new line in a comment</td></tr>
+      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+C</kbd></td><td>copy the selected text</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Esc</kbd></td><td>cancel / clear selection</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Enter</kbd></td><td>send open comments to <span class="an">the agent</span></td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
@@ -97,7 +99,7 @@
 <button id="back" title="Back (Alt+Left)">&larr; back</button>
 <div id="pop">
   <textarea id="popText" placeholder="Enter: save · Shift+Enter: new line · Cmd+Enter: save and send · Esc: cancel"></textarea>
-  <div class="btns"><button id="popCancel">Cancel</button><button id="popSave">Save</button></div>
+  <div class="btns"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popCancel">Cancel</button><button id="popSave">Save</button></div>
 </div>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -388,6 +390,7 @@ function openPop(r, edit) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 340)) + "px";
   pop.style.top = Math.min(r.bottom + 6, window.innerHeight - 160) + "px";
   pop.style.display = "block"; popText.value = edit ? edit.comment : "";
+  document.getElementById("popCopy").style.display = edit ? "none" : "";
   drawHighlights();  // keep the selected text marked while typing
   popText.focus();
 }
@@ -443,9 +446,33 @@ async function savePop() {
   closePop(); window.getSelection().removeAllRanges(); loadComments();
 }
 document.getElementById("popSave").onclick = savePop;
+// The comment box takes focus, so the page selection is no longer what the browser copies.
+// Copy the selected PDF text instead: with the button, or with the system's copy shortcut or
+// Edit menu while nothing is selected inside the comment box.
+const copyBtn = document.getElementById("popCopy");
+function copied() { copyBtn.textContent = "Copied"; setTimeout(() => copyBtn.textContent = "Copy text", 1200); }
+async function copyQuote() {
+  if (!pending) return;
+  try { await navigator.clipboard.writeText(pending.quote); }
+  catch (e) {  // clipboard API unavailable: fall back to a temporary textarea
+    const t = document.createElement("textarea"); t.value = pending.quote; document.body.appendChild(t);
+    t.select(); document.execCommand("copy"); t.remove();
+  }
+  copied(); popText.focus();
+}
+copyBtn.onclick = copyQuote;
+document.addEventListener("copy", e => {
+  if (!pending || pop.style.display !== "block") return;
+  if (document.activeElement === popText && popText.selectionStart !== popText.selectionEnd) return;
+  e.clipboardData.setData("text/plain", pending.quote);
+  e.preventDefault(); copied();
+});
 // In the comment box: Enter saves, Shift+Enter adds a new line, Cmd+Enter saves and
 // sends all open comments, Esc cancels.
 popText.addEventListener("keydown", async e => {
+  // Some browsers send no copy event when nothing is selected in the box, so catch Cmd/Ctrl+C here.
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !e.shiftKey && !e.altKey &&
+      pending && popText.selectionStart === popText.selectionEnd) { e.preventDefault(); return copyQuote(); }
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); await savePop(); sendComments(); }
   else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); savePop(); }
   else if (e.key === "Escape") { e.stopPropagation(); closePop(); window.getSelection().removeAllRanges(); }
