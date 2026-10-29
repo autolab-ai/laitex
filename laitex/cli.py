@@ -201,7 +201,7 @@ def make_handler(st, agent_name):
                 items = st.load()
                 for c in items:
                     if c["id"] == cid:
-                        for k in ("status", "comment", "reply"):
+                        for k in ("status", "comment", "reply", "page", "rects", "context"):
                             if k in data:
                                 c[k] = data[k]
                 st.save(items)

@@ -298,6 +298,7 @@ async function loadDoc() {
     drawHighlights();
     statusEl.textContent = "updated " + new Date().toLocaleTimeString();
     renderVisible();
+    reanchor(d);
   } catch (e) {
     console.error(e);
     statusEl.textContent = "PDF not ready, retrying";
@@ -318,6 +319,89 @@ function setZoom(z) {
 }
 let scrollTimer;
 main.addEventListener("scroll", () => { hideTip(); clearTimeout(scrollTimer); scrollTimer = setTimeout(renderVisible, 80); });
+
+// ---- keep highlights on their text when the PDF is rebuilt ----
+// A rebuild moves text around, so a comment's stored boxes can end up over other words.
+// After each reload, look for the quote again (letters only, so hyphenation and line numbers
+// do not matter), use the surrounding context to choose between repeated matches, and store
+// the new page and boxes.
+const skel = t => (t || "").toLowerCase().replace(/[^\p{L}]/gu, "");
+const dense = t => (t || "").replace(/\s+/g, "");
+async function pageText(d, n) {
+  const page = await d.getPage(n), vp = page.getViewport({ scale: 1 });
+  const items = (await page.getTextContent()).items.filter(it => it.str);
+  return { vp, items };
+}
+// Text of a page reduced by `keep` (a per-character test), with a map back to [item, char].
+function reduce(pt, keep) {
+  let txt = ""; const map = [];
+  pt.items.forEach((it, k) => { for (let j = 0; j < it.str.length; j++) if (keep(it.str[j])) { txt += it.str[j]; map.push([k, j]); } });
+  return { txt, map };
+}
+function boxes(pt, map, i0, i1) {
+  // One box per text item, covering the matched characters of that item.
+  const spans = new Map();
+  for (let i = i0; i < i1; i++) {
+    const [k, j] = map[i], s = spans.get(k);
+    spans.set(k, s ? [s[0], j + 1] : [j, j + 1]);
+  }
+  const W = pt.vp.width, H = pt.vp.height, out = [];
+  for (const [k, [j0, j1]] of spans) {
+    const it = pt.items[k], [a, b, c, dd, e, f] = it.transform, n = it.str.length;
+    const h = Math.hypot(c, dd) || it.height || 10, w = it.width;
+    const r = pt.vp.convertToViewportRectangle([e + w * j0 / n, f - 0.25 * h, e + w * j1 / n, f + 0.85 * h]);
+    const x = Math.min(r[0], r[2]), y = Math.min(r[1], r[3]);
+    out.push([x / W, y / H, Math.abs(r[2] - r[0]) / W, Math.abs(r[3] - r[1]) / H]);
+  }
+  return out;
+}
+function commonEnd(a, b) { let n = 0; while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++; return n; }
+function commonStart(a, b) { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; }
+let reanchoring = false;
+async function reanchor(d) {
+  const todo = comments.filter(c => c.status !== "resolved" && c.quote);
+  if (reanchoring || !todo.length) return;
+  reanchoring = true;
+  try {
+    const texts = [];
+    for (let n = 1; n <= d.numPages; n++) texts.push(await pageText(d, n));
+    if (d !== doc) return;
+    let changed = false;
+    for (const c of todo) {
+      // Letters only, unless the quote has too few letters to be found that way (e.g. a formula).
+      const useSkel = skel(c.quote).length >= 6, norm = useSkel ? skel : dense;
+      const keep = useSkel ? ch => /\p{L}/u.test(ch) : ch => !/\s/.test(ch);
+      const q = norm(c.quote); if (!q) continue;
+      const ctx = c.context || "", m = ctx.indexOf("[[");
+      const before = m >= 0 ? norm(ctx.slice(0, m)) : "", after = m >= 0 ? norm(ctx.slice(ctx.indexOf("]]", m) + 2)) : "";
+      const oldY = c.rects && c.rects.length ? c.rects[0][1] : 0;
+      let best = null;
+      texts.forEach((pt, i) => {
+        const red = reduce(pt, keep);
+        if (useSkel) red.txt = red.txt.toLowerCase();
+        for (let at = red.txt.indexOf(q); at >= 0; at = red.txt.indexOf(q, at + 1)) {
+          const ctxScore = commonEnd(before, red.txt.slice(0, at)) + commonStart(after, red.txt.slice(at + q.length));
+          const rects = boxes(pt, red.map, at, at + q.length);
+          const score = ctxScore * 10 - Math.abs(i + 1 - c.page) * 50 - Math.abs((rects[0] || [0, 0])[1] - oldY) * 20;
+          if (!best || score > best.score) best = { score, page: i + 1, rects };
+        }
+      });
+      if (!best) continue;  // the text was rewritten; keep the old boxes
+      const same = best.page === c.page && JSON.stringify(best.rects.map(r => r.map(v => v.toFixed(3)))) ===
+                   JSON.stringify((c.rects || []).map(r => r.map(v => v.toFixed(3))));
+      if (same) continue;
+      // Skip the update if the old boxes are already close (selection boxes and computed boxes differ slightly).
+      const near = best.page === c.page && c.rects && c.rects.length && best.rects.length &&
+        Math.abs(best.rects[0][0] - c.rects[0][0]) < 0.01 && Math.abs(best.rects[0][1] - c.rects[0][1]) < 0.01;
+      if (near) continue;
+      c.page = best.page; c.rects = best.rects; changed = true;
+      await fetch("/api/comments/" + c.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: c.page, rects: c.rects }) });
+    }
+    if (changed) { lastCommentsJson = ""; await loadComments(); drawHighlights(); }
+  } catch (e) { console.error(e); }
+  finally { reanchoring = false; }
+}
 
 function drawHighlights() {
   pagesEl.querySelectorAll(".hl").forEach(h => h.replaceChildren());
@@ -432,17 +516,23 @@ function openPop(r) {
   popText.focus();
 }
 // A little text around the selection, so the agent can find short quotes in the source.
-function contextOf(pageEl, quote) {
-  // Join the text layer's spans, with a space wherever a new line starts.
-  let txt = "", lastTop = null;
+function contextOf(pageEl, quote, range) {
+  // Join the text layer's spans, with a space wherever a new line starts, and note where the
+  // selection starts, so a quote that occurs several times on the page gets its own context.
+  let txt = "", lastTop = null, start = -1;
   for (const n of pageEl.querySelector(".textLayer").children) {
     if (n.nodeName !== "SPAN") { txt += " "; continue; }
     const top = n.offsetTop;
     if (lastTop !== null && Math.abs(top - lastTop) > n.offsetHeight / 2) txt += " ";
+    if (start < 0 && range && n.contains(range.startContainer))
+      start = txt.length + (range.startContainer.nodeType === 3 ? range.startOffset : 0);
     txt += n.textContent; lastTop = top;
   }
+  // Collapse whitespace, keeping track of where the selection start moves to.
+  if (start >= 0) start = txt.slice(0, start).replace(/\s+/g, " ").length;
   txt = txt.replace(/\s+/g, " ");
-  let i = txt.indexOf(quote);
+  let i = start >= 0 && txt.slice(start).trimStart().startsWith(quote.slice(0, 20)) ? start + (txt.slice(start).length - txt.slice(start).trimStart().length) : -1;
+  if (i < 0) i = txt.indexOf(quote);
   if (i < 0) i = txt.indexOf(quote.slice(0, 40));
   if (i < 0) return "";
   return txt.slice(Math.max(0, i - 150), i) + "[[" + quote + "]]" + txt.slice(i + quote.length, i + quote.length + 150);
@@ -463,7 +553,7 @@ document.addEventListener("mouseup", ev => {
       .map(r => [(r.left - pr.left) / pr.width, (r.top - pr.top) / pr.height, r.width / pr.width, r.height / pr.height]);
     if (!rects.length) return;
     const quote = sel.toString().replace(/\s+/g, " ").trim();
-    pending = { page: +pageEl.dataset.page, quote, context: contextOf(pageEl, quote), rects };
+    pending = { page: +pageEl.dataset.page, quote, context: contextOf(pageEl, quote, range), rects };
     openPop(range.getBoundingClientRect());
   }, 0);
 });
