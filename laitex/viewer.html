@@ -156,8 +156,8 @@ async function resolveDest(d, dest) {
   const explicit = typeof dest === "string" ? await d.getDestination(dest) : dest;
   if (!explicit) return null;
   const pageIndex = await d.getPageIndex(explicit[0]);
-  const y = explicit[1] && explicit[1].name === "XYZ" ? explicit[3] : null;
-  return { n: pageIndex + 1, y };
+  const xyz = explicit[1] && explicit[1].name === "XYZ";
+  return { n: pageIndex + 1, x: xyz ? explicit[2] : null, y: xyz ? explicit[3] : null };
 }
 function goTo(t) {
   const div = pagesEl.children[t.n - 1];
@@ -172,11 +172,51 @@ async function previewText(d, t) {
   const page = await d.getPage(t.n);
   const tc = await page.getTextContent();
   const y0 = t.y == null ? sizes[t.n - 1].h : t.y;
-  const items = tc.items.filter(it => it.str && it.transform[5] <= y0 + 2 && it.transform[5] > y0 - 46);
+  const items = tc.items.filter(it => it.str && it.transform[5] <= y0 + 2 && it.transform[5] > y0 - 80);
+  // Group the items into lines, top to bottom.
   items.sort((a, b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]);
-  let txt = "", lastY = null;
-  for (const it of items) { if (lastY !== null && Math.abs(it.transform[5] - lastY) > 2) txt += " "; txt += it.str; lastY = it.transform[5]; }
-  return txt.replace(/\s+/g, " ").trim().slice(0, 400);
+  let lines = [];
+  for (const it of items) {
+    const l = lines[lines.length - 1];
+    if (l && Math.abs(l.y - it.transform[5]) <= 2) l.items.push(it); else lines.push({ y: it.transform[5], items: [it] });
+  }
+  // Baselines within a line differ slightly (labels, superscripts), so order each line by x.
+  for (const l of lines) l.items.sort((a, b) => a.transform[4] - b.transform[4]);
+  // Keep only the destination's column: on each line, start at the first item right of the
+  // target's left edge and follow the items while they touch. The gap to the next column,
+  // or to the line numbers in the margin, ends the run.
+  if (t.x != null) {
+    for (const l of lines) {
+      const row = l.items.filter(it => it.transform[4] >= t.x - 3);
+      const run = [];
+      let solidEnd = null;  // right end of the last item with visible text
+      for (const it of row) {
+        const prev = run[run.length - 1];
+        if (prev && it.transform[4] - (prev.transform[4] + prev.width) > 8) break;
+        // A trailing space can be stretched up to the margin; a number far past the text is a line number.
+        if (solidEnd !== null && /^\s*\d+\s*$/.test(it.str) && it.transform[4] - solidEnd > 8) break;
+        run.push(it);
+        if (it.str.trim()) solidEnd = it.transform[4] + it.width;
+      }
+      l.items = run;
+    }
+    lines = lines.filter(l => l.items.length);
+  }
+  // Drop lines that are only a number: page numbers and margin line numbers.
+  lines = lines.filter(l => !/^\s*\d*\s*$/.test(l.items.map(it => it.str).join("")));
+  const text = l => l.items.map((it, i) => {
+    const prev = l.items[i - 1];  // a visible gap between items is a space the PDF does not spell out
+    return prev && it.transform[4] - (prev.transform[4] + prev.width) > 1 ? " " + it.str : it.str;
+  }).join("");
+  // A bibliography entry: start at its label and stop before the next one.
+  const label = /^\s*\[[^\]]{1,12}\]/, first = lines.findIndex(l => label.test(text(l)));
+  if (first >= 0) {
+    const next = lines.findIndex((l, i) => i > first && label.test(text(l)));
+    lines = lines.slice(first, next < 0 ? undefined : next);
+  } else lines = lines.filter(l => l.y > y0 - 46);
+  // Rejoin words hyphenated at a line break ("diffu- sion" -> "diffusion").
+  const txt = lines.map(text).join(" ").replace(/\s+/g, " ").replace(/(\p{Ll})- (\p{Ll})/gu, "$1$2").trim();
+  return txt.length > 500 ? txt.slice(0, 500) + "…" : txt;
 }
 async function buildLinks(div, page, d) {
   const layer = document.createElement("div"); layer.className = "links"; div.appendChild(layer);
