@@ -52,6 +52,8 @@
   .c .q { color: #666; font-style: italic; border-left: 3px solid #f2c500; padding-left: 6px; margin-bottom: 4px;
           max-height: 3.9em; overflow: hidden; }
   .c .t { white-space: pre-wrap; }
+  .c textarea.te { display: block; width: 100%; font: inherit; resize: vertical; padding: 4px;
+                   border: 1px solid #9bb8e8; border-radius: 4px; overflow: hidden; }
   .c .r { white-space: pre-wrap; margin-top: 6px; padding: 6px; background: #eef4ff; border-radius: 4px; }
   .c .meta { font-size: 11px; color: #999; margin-top: 4px; display: flex; gap: 8px; }
   .c .meta a { color: #36c; cursor: pointer; }
@@ -107,7 +109,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const main = document.getElementById("main");
 const pagesEl = document.getElementById("pages");
 const statusEl = document.getElementById("status");
-let mtime = null, comments = [], loading = false, pending = null, activeId = null, editing = null;
+let mtime = null, comments = [], loading = false, pending = null, activeId = null, inlineEdit = null;
 let agentName = "the agent", request_ = null;
 const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 let doc = null, sizes = [], gen = 0;  // sizes: unscaled page sizes in PDF points
@@ -348,19 +350,26 @@ function drawList() {
   for (const c of items) {
     const el = document.createElement("div");
     el.className = "c " + c.status;
-    el.innerHTML = `<div class="q">${esc(c.quote)}</div><div class="t">${esc(c.comment)}</div>` +
+    const ed = inlineEdit && inlineEdit.id === c.id;
+    el.innerHTML = `<div class="q">${esc(c.quote)}</div>` +
+      (ed ? `<textarea class="te" rows="2"></textarea>` : `<div class="t">${esc(c.comment)}</div>`) +
       (c.reply ? `<div class="r">${esc(c.reply)}</div>` : "") +
       `<div class="meta">p.${c.page} · ${c.status}` +
-      ` <a data-act="toggle">${c.status === "resolved" ? "reopen" : "resolve"}</a>` +
-      ` <a data-act="edit">edit</a> <a data-act="del">delete</a></div>`;
+      (ed ? ` <a data-act="save">save</a> <a data-act="cancel">cancel</a>`
+          : ` <a data-act="toggle">${c.status === "resolved" ? "reopen" : "resolve"}</a>` +
+            ` <a data-act="edit">edit</a> <a data-act="del">delete</a>`) + `</div>`;
+    if (ed) setupInlineEdit(el.querySelector("textarea"));
     el.onclick = async ev => {
       const act = ev.target.dataset && ev.target.dataset.act;
+      if (ev.target.tagName === "TEXTAREA") return;
+      if (act === "save") return saveInline(false);
+      if (act === "cancel") return cancelInline();
       if (act === "toggle") {
         await fetch("/api/comments/" + c.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: c.status === "resolved" ? "open" : "resolved" }) });
         return loadComments();
       }
-      if (act === "edit") { ev.stopPropagation(); return openPop(el.getBoundingClientRect(), c); }
+      if (act === "edit") { ev.stopPropagation(); return startInline(c); }
       if (act === "del") {
         if (confirm("Delete this comment?")) { await fetch("/api/comments/" + c.id, { method: "DELETE" }); loadComments(); }
         return;
@@ -379,18 +388,46 @@ function drawList() {
 let lastCommentsJson = "";
 async function loadComments() {
   const r = await fetch("/api/comments"); const txt = await r.text();
-  if (txt !== lastCommentsJson) { lastCommentsJson = txt; comments = JSON.parse(txt); drawList(); drawHighlights(); }
+  if (txt !== lastCommentsJson) {
+    lastCommentsJson = txt; comments = JSON.parse(txt);
+    if (!inlineEdit) drawList();  // redrawing would replace the comment being edited
+    drawHighlights();
+  }
+}
+
+// Editing a comment turns its text in the card into a text box.
+// Enter saves, Shift+Enter adds a new line, Cmd+Enter saves and sends, Esc cancels.
+function startInline(c) { closePop(); inlineEdit = { id: c.id, text: c.comment }; drawList(); }
+function cancelInline() { inlineEdit = null; drawList(); }
+async function saveInline(send) {
+  const e = inlineEdit; inlineEdit = null;
+  const c = comments.find(x => x.id === e.id), text = e.text.trim();
+  // A changed comment is reopened, so it goes to the agent again with the next send.
+  if (c && text && text !== c.comment)
+    await fetch("/api/comments/" + e.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment: text, status: "open" }) });
+  lastCommentsJson = ""; await loadComments();
+  if (send) sendComments();
+}
+function setupInlineEdit(ta) {
+  const fit = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; };
+  ta.value = inlineEdit.text;
+  ta.addEventListener("input", () => { inlineEdit.text = ta.value; fit(); });
+  ta.addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); saveInline(true); }
+    else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); saveInline(false); }
+    else if (e.key === "Escape") { e.stopPropagation(); cancelInline(); }
+  });
+  requestAnimationFrame(() => { fit(); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); });
 }
 document.getElementById("showResolved").onchange = () => { drawList(); drawHighlights(); };
 
 // selection -> comment popup
 const pop = document.getElementById("pop"), popText = document.getElementById("popText");
-function openPop(r, edit) {
-  editing = edit || null;
+function openPop(r) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 340)) + "px";
   pop.style.top = Math.min(r.bottom + 6, window.innerHeight - 160) + "px";
-  pop.style.display = "block"; popText.value = edit ? edit.comment : "";
-  document.getElementById("popCopy").style.display = edit ? "none" : "";
+  pop.style.display = "block"; popText.value = "";
   drawHighlights();  // keep the selected text marked while typing
   popText.focus();
 }
@@ -430,16 +467,10 @@ document.addEventListener("mouseup", ev => {
     openPop(range.getBoundingClientRect());
   }, 0);
 });
-function closePop() { pop.style.display = "none"; pending = null; editing = null; drawHighlights(); }
+function closePop() { pop.style.display = "none"; pending = null; drawHighlights(); }
 document.getElementById("popCancel").onclick = closePop;
 async function savePop() {
   const text = popText.value.trim();
-  if (editing) {
-    // Editing a comment reopens it, so it goes to the agent again with the next send.
-    if (text) await fetch("/api/comments/" + editing.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ comment: text, status: "open" }) });
-    closePop(); return loadComments();
-  }
   if (!pending || !text) return closePop();
   await fetch("/api/comments", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...pending, comment: text }) });
