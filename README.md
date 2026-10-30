@@ -122,7 +122,10 @@ The viewer also:
   builds with how many lines and characters of text each one added and removed, and selectors at
   its top pick the build to show and the one to compare it with. The pages then show what changed,
   on the newer build with added words in green and removals marked in red, or side by side, and
-  the selected build lists its changes and the comments answered in it. Builds are kept in your cache
+  the selected build lists its changes and the comments answered in it. A version is one chunk
+  of the agent's work: the agent closes it with `laitex checkpoint`, which in a git repository also
+  records the source in a commit under `refs/laitex/` (on no branch, never pushed), so any version
+  can be rolled back to from the tab; the agent restores the files and rebuilds. Builds are kept in your cache
   folder (`~/Library/Caches/laitex` or `~/.cache/laitex`), the last 40 per PDF, and a rebuild
   that changes nothing is not kept;
 - has a chat with the agent (the chat button; × hides it). With Claude Code the panel mirrors
@@ -136,7 +139,7 @@ The viewer also:
 ## How the agent connects
 
 The viewer and the agent share a folder next to the PDF, `.laitex-review/<name>/`, which ignores
-itself in git. The agent does not touch that folder directly. It uses six commands
+itself in git. The agent does not touch that folder directly. It uses these commands
 (`laitex` here is `~/.laitex/bin/laitex`, or the command on PATH after a pip install):
 
 | Command | What it does |
@@ -146,6 +149,8 @@ itself in git. The agent does not touch that folder directly. It uses six comman
 | `laitex reply doc.pdf ID "text"` | answer a comment and mark it resolved (`--status answered` to only reply) |
 | `laitex say doc.pdf "text"` | answer in the chat panel (not needed when the panel mirrors the agent's session) |
 | `laitex done doc.pdf` | tell the viewer the request is handled |
+| `laitex checkpoint doc.pdf -m "..."` | close the current version with a summary, and record the source in git for rollback |
+| `laitex rollback doc.pdf N` | restore the source of version N into the working tree |
 | `laitex comments doc.pdf` | list open comments as JSON (`--status all` for every comment) |
 
 `laitex wait` prints:

@@ -35,8 +35,9 @@ keeps the skill current.
    when it exits (Claude Code: `run_in_background: true`), do that, so you stay free to talk
    to the user meanwhile. Otherwise run it in the foreground with `--timeout 600` and start it again
    on exit code 2 (timeout).
-4. Handle the request (below), then run `laitex done path/to/doc.pdf`. For a chat message
-   alone (`request` is null), skip `done`.
+4. Handle the request (below). If it changed the document, rebuild and run
+   `laitex checkpoint path/to/doc.pdf -m "<one-line summary>"` (see Versions). Then run
+   `laitex done path/to/doc.pdf`; for a chat message alone (`request` is null), skip `done`.
 5. Go back to step 3. Stop when the user says the review is over, then
    `laitex stop path/to/doc.pdf` if they want the viewer closed.
 
@@ -70,6 +71,14 @@ not listening are kept and picked up by the next `wait`.
 - `commit`: commit the source changes made in this review and push them, if the project is
   a git repository. Use a message that summarizes the edits. Do not commit the
   `.laitex-review/` folder (it ignores itself).
+- `rollback`: the user wants the document back as it was at version `request.version`. If the
+  newest version is still in progress, checkpoint it first so it stays in the history. Run
+  `laitex rollback doc.pdf <version>`, which restores that version's source files into the working
+  tree and prints what changed, then rebuild and run `laitex checkpoint doc.pdf -m "Rolled back to
+  v<version>"`. Tell the user what changed in the chat (or with `laitex say`). The command leaves
+  untracked files created after that version in place and lists them; delete them only if you
+  created them in this review. If it reports that the version has no source snapshot, restore it
+  another way (for example from git history) or tell the user it cannot be done.
 
 ## Chat
 
@@ -91,6 +100,19 @@ asks for. `page` is the page they were looking at. If they also pressed a button
   `laitex say doc.pdf "..."` (or `-` to read it from stdin).
 
 Then wait again.
+
+## Versions
+
+The viewer's History tab shows one version per chunk of your work: each request, or each chat
+task that changed the document. A rebuild starts a version marked "in progress" and later
+rebuilds update it; `laitex checkpoint doc.pdf -m "Applied 3 comments on the intro"` closes it
+with that summary. In a git repository it also records the source files of that moment in a
+commit under `refs/laitex/`, which is on no branch, leaves the index and working tree alone, and
+is not pushed, so the user can roll back to any version from the viewer.
+
+Checkpoint after every chunk unless the user asks otherwise. If they ask for fewer versions (one
+per several requests, only when they say so) or none, do that for the rest of the session. The
+first build is kept when you run `laitex open`.
 
 ## Handling comments
 

@@ -108,6 +108,10 @@
   .ver .vs .p { color: var(--ins-fg); }
   .ver .vs .m { color: var(--del-fg); }
   .ver .vd { margin-top: 6px; border-top: 1px solid var(--line); }
+  .ver .vl { margin-top: 2px; overflow-wrap: anywhere; }
+  .ver .vt i { font-style: normal; color: #d97757; }
+  .ver .rb { margin-top: 6px; font-size: 11px; padding: 2px 8px; }
+  .ver .rbn { margin-top: 6px; font-size: 11px; color: #d97757; }
   .hk { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
   .hk:hover, .hk.on { background: var(--card); }
   .hk .pg { color: var(--faint); font-size: 11px; margin-right: 4px; }
@@ -598,7 +602,7 @@ function setZoom(z) {
   document.getElementById("zoomLabel").textContent = Math.round(zoom * 100) + "%";
   gen++;            // cancel renders at the old size
   layout();         // instant preview
-  if (histOpen && cmp) { histToken++; histLayout(); }
+  if (histOpen && cmp) histZoom();
   clearTimeout(zoomTimer); zoomTimer = setTimeout(renderVisible, 150);
 }
 let scrollTimer;
@@ -900,6 +904,7 @@ async function poll() {
     }
     agentName = st.agent_name || "the agent";
     document.querySelectorAll(".an").forEach(s => s.textContent = agentName);
+    if (histOpen && JSON.stringify(st.request) !== JSON.stringify(request_)) { request_ = st.request; histRenderList(); }
     request_ = st.request;
     const ag = document.getElementById("agent");
     ag.className = st.listening ? "on" : "";
@@ -1058,8 +1063,8 @@ function wordDiff(a, b) {
 
 const hist = document.getElementById("hist"), histPages = document.getElementById("histPages");
 const histList = document.getElementById("histList"), histA = document.getElementById("histA"), histB = document.getElementById("histB");
-let histOpen = false, histMode = "single", histOnly = false, histVersions = [], histToken = 0, histObs = null, cmp = null;
-try { histMode = localStorage.getItem("histMode") || "single"; histOnly = localStorage.getItem("histOnly") === "1"; } catch (e) {}
+let histOpen = false, histMode = "side", histOnly = false, histVersions = [], histToken = 0, histObs = null, cmp = null;
+try { histMode = localStorage.getItem("histView") || "side"; histOnly = localStorage.getItem("histOnly") === "1"; } catch (e) {}
 document.getElementById("histOnly").checked = histOnly;
 const histDocs = new Map();  // version -> promise of {d, toks, sizes}
 
@@ -1119,22 +1124,26 @@ async function docWords(d) {
   for (const t of out) t.key = t.w.normalize("NFKC").replace(/[-‐-—]/g, "");
   return { toks: out, sizes };
 }
+// A version's PDF and words, by number and revision: the version in progress takes newer
+// builds under the same number.
 function histDoc(n) {
-  if (!histDocs.has(n)) {
-    histDocs.set(n, (async () => {
-      const d = await pdfjsLib.getDocument({ url: `/version/${n}.pdf` }).promise;
+  const v = histVersions.find(x => x.n === n), rev = v ? v.rev : "", key = `${n}:${rev}`;
+  if (!histDocs.has(key)) {
+    histDocs.set(key, (async () => {
+      const d = await pdfjsLib.getDocument({ url: `/version/${n}.pdf?r=${rev}` }).promise;
       return { d, ...(await docWords(d)) };
     })());
     for (const k of [...histDocs.keys()].slice(0, -4)) {  // keep a few builds in memory, and the two on show
-      if (cmp && (k === cmp.a || k === cmp.b)) continue;
-      histDocs.get(k).then(v => v.d.destroy()).catch(() => {});
+      if (cmp && (k === `${cmp.a}:${cmp.aRev}` || k === `${cmp.b}:${cmp.bRev}`)) continue;
+      histDocs.get(k).then(x => x.d.destroy()).catch(() => {});
       histDocs.delete(k);
     }
   }
-  return histDocs.get(n);
+  return histDocs.get(key);
 }
+const revOf = n => (histVersions.find(x => x.n === n) || {}).rev;
 const vTime = v => new Date(v.time);
-const vLabel = (v, latest) => `v${v.n} · ${vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}${latest ? " (current)" : ""}`;
+const vLabel = (v, latest) => `v${v.n} · ${vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}${latest ? " (current)" : ""}${v.sealed ? "" : ", in progress"}`;
 async function histLoad(keep) {
   histVersions = await (await fetch("/api/versions")).json();
   const vs = histVersions.slice().reverse(), b0 = +histB.value, a0 = histA.value;
@@ -1166,7 +1175,8 @@ function statsOf(A, B, d) {
 async function saveStats(n, st) {
   const v = histVersions.find(v => v.n === n);
   if (v) v.stats = st;
-  try { await fetch(`/api/versions/${n}/stats`, { method: "POST", headers: H, body: JSON.stringify(st) }); } catch (e) {}
+  const body = JSON.stringify({ ...st, rev: v ? v.rev : "" });
+  try { await fetch(`/api/versions/${n}/stats`, { method: "POST", headers: H, body }); } catch (e) {}
 }
 // Count the builds that have no counts yet, newest first, while the History tab is open.
 let statsRunning = false;
@@ -1220,7 +1230,7 @@ async function histShow() {
     h.aAnchor = h.del ? A.toks[i].boxes[0] : null;
     h.old = A ? textOf(A.toks, h.a0, h.a1) : ""; h.new = textOf(B.toks, h.b0, h.b1);
   });
-  cmp = { a, b, A, B, aMark, bMark, hunks };
+  cmp = { a, b, A, B, aMark, bMark, hunks, aRev: revOf(a), bRev: revOf(b) };
   let plus = 0, minus = 0;
   for (const m of bMark) if (m >= 0) plus++;
   for (const m of aMark) if (m >= 0) minus++;
@@ -1241,16 +1251,41 @@ function changedPages(side) {
 function histPage(side, n, width) {
   const s = cmp[side].sizes[n - 1], div = document.createElement("div");
   div.className = "page hpage"; div.dataset.side = side; div.dataset.page = n;
+  div.dataset.w1 = width / zoom; div.dataset.r = s.h / s.w;  // the width at zoom 1, and the shape
   div.style.width = width + "px"; div.style.height = width * s.h / s.w + "px";
   div.append(document.createElement("canvas"));
-  histObs.observe(div);
   return div;
 }
-function histLayout() {
-  const tok = histToken;
+// Render the pages as they come near the view.
+function histObserve(tok) {
+  if (histObs) histObs.disconnect();
   histObs = new IntersectionObserver(es => es.forEach(e => {
     if (e.isIntersecting) { histObs.unobserve(e.target); histRender(e.target, tok); }
   }), { root: histPages, rootMargin: "1200px 0px" });
+  histPages.querySelectorAll(".hpage").forEach(d => histObs.observe(d));
+}
+// Zooming stretches the pages at once, keeping the view on the same spot, and renders them
+// again at the new size once the zoom settles, as the main view does.
+let histZoomTimer;
+function histZoom() {
+  const pages = [...histPages.querySelectorAll(".hpage")];
+  const at = pages.find(p => p.offsetTop + p.offsetHeight > histPages.scrollTop);
+  const f = at ? (histPages.scrollTop - at.offsetTop) / at.offsetHeight : 0;
+  for (const p of pages) {
+    const w = +p.dataset.w1 * zoom;
+    p.style.width = w + "px"; p.style.height = w * +p.dataset.r + "px";
+  }
+  if (at) histPages.scrollTop = at.offsetTop + f * at.offsetHeight;
+  clearTimeout(histZoomTimer);
+  histZoomTimer = setTimeout(() => histObserve(++histToken), 200);
+}
+histPages.addEventListener("wheel", e => {  // pinch on a trackpad arrives as ctrl+wheel
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  setZoom(zoom * Math.exp(-e.deltaY * 0.01));
+}, { passive: false });
+function histLayout() {
+  const tok = histToken;
   const avail = histPages.clientWidth - 40, rows = [];
   if (histMode === "side" && cmp.A) {
     const w = Math.min((avail - 16) / 2, 1100) * zoom, ca = changedPages("A"), cb = changedPages("B");
@@ -1277,6 +1312,7 @@ function histLayout() {
     note.textContent = "No text changed between these builds."; rows.push(note);
   }
   histPages.replaceChildren(...rows);
+  histObserve(tok);
 }
 async function histRender(div, tok) {
   const side = div.dataset.side, n = +div.dataset.page, src = cmp[side];
@@ -1317,6 +1353,8 @@ async function histRender(div, tok) {
   });
   layer.addEventListener("mouseout", () => { tip.style.display = "none"; });
   layer.addEventListener("click", e => { if (e.target.dataset.h !== undefined) histFocus(+e.target.dataset.h, false); });
+  const old = div.querySelector(".chg");
+  if (old) old.remove();
   div.append(layer);
 }
 // The builds, newest first, each with how much text it changed. The selected one opens to list
@@ -1334,6 +1372,7 @@ function histRenderList() {
     const row = document.createElement("div"); row.className = "ver" + (v.n === sel ? " on" : "");
     const t = document.createElement("div"); t.className = "vt";
     const name = document.createElement("b"); name.textContent = `v${v.n}` + (v.n === latest ? " (current)" : "");
+    if (!v.sealed) { const ip = document.createElement("i"); ip.textContent = " in progress"; name.append(ip); }
     const when = document.createElement("span");
     when.textContent = vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     t.append(name, when);
@@ -1344,6 +1383,26 @@ function histRenderList() {
                                         : "no text changes";
     } else st.textContent = v.n === first ? "the first build kept" : "counting…";
     row.append(t, st);
+    if (v.label && v.label !== "the first build kept") {
+      const l = document.createElement("div"); l.className = "vl"; l.textContent = v.label; row.append(l);
+    }
+    // Any sealed version but the newest can be restored; the agent does it, the viewer only asks.
+    const rolling = request_ && request_.action === "rollback" && request_.version === v.n;
+    if (rolling) {
+      const n = document.createElement("div"); n.className = "rbn";
+      n.textContent = `rolling back to v${v.n}, ${agentName} is working…`; row.append(n);
+    } else if (v.sealed && v.source && v.n !== latest) {
+      const btn = document.createElement("button"); btn.className = "rb"; btn.textContent = "roll back to this version";
+      btn.title = `Ask ${agentName} to restore the source of v${v.n} and rebuild`;
+      btn.onclick = async e => {
+        e.stopPropagation();
+        if (!confirm(`Ask ${agentName} to restore the source of v${v.n} and rebuild? Later versions stay in the history.`)) return;
+        request_ = await (await fetch("/api/request", { method: "POST", headers: H,
+                                                       body: JSON.stringify({ action: "rollback", version: v.n }) })).json();
+        histRenderList();
+      };
+      row.append(btn);
+    }
     if (v.n === sel) { if (cmp && cmp.b === sel) row.append(histDetails()); }
     else row.onclick = () => { histB.value = v.n; histA.value = prevOf(v.n); histShow(); };
     histList.append(row);
@@ -1405,18 +1464,22 @@ async function setHist(open) {
   histShow();
   fillStats();
   // A new build while the history is open: list it, and follow it if the newest build is on show.
+  const sig = () => JSON.stringify(histVersions.map(v => [v.n, v.rev, v.sealed, v.label]));
   histPoll = setInterval(async () => {
-    const before = histVersions.length ? histVersions[histVersions.length - 1].n : 0, wasLatest = +histB.value === before;
+    const last = histVersions[histVersions.length - 1], before = last ? last.n : 0, beforeRev = last ? last.rev : "";
+    const wasLatest = +histB.value === before, was = sig();
     await histLoad(true);
-    const now_ = histVersions.length ? histVersions[histVersions.length - 1].n : 0;
-    if (now_ === before) return;
-    if (wasLatest) { histB.value = now_; histA.value = before; histShow(); } else histRenderList();
+    if (sig() === was) return;
+    const now_ = histVersions[histVersions.length - 1];
+    if (wasLatest && now_ && (now_.n !== before || now_.rev !== beforeRev)) {
+      histB.value = now_.n; histA.value = prevOf(now_.n); histShow();
+    } else histRenderList();
     fillStats();
   }, 3000);
 }
 histA.onchange = histB.onchange = () => histShow();
-document.getElementById("histSingle").onclick = () => { histMode = "single"; try { localStorage.setItem("histMode", histMode); } catch (e) {} histShow(); };
-document.getElementById("histSide").onclick = () => { histMode = "side"; try { localStorage.setItem("histMode", histMode); } catch (e) {} histShow(); };
+document.getElementById("histSingle").onclick = () => { histMode = "single"; try { localStorage.setItem("histView", histMode); } catch (e) {} histShow(); };
+document.getElementById("histSide").onclick = () => { histMode = "side"; try { localStorage.setItem("histView", histMode); } catch (e) {} histShow(); };
 document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
 histPages.addEventListener("scroll", () => { tip.style.display = "none"; });
 window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setDock(null); });

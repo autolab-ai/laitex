@@ -16,6 +16,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -304,18 +305,22 @@ def cache_root():
 
 
 class Versions:
-    """Every distinct build of the PDF, kept in the user's cache folder rather than next to
-    the PDF: builds can be large, and the PDF often sits in a synced or versioned folder.
+    """The versions of the PDF, kept in the user's cache folder rather than next to the PDF:
+    builds can be large, and the PDF often sits in a synced or versioned folder.
+
+    A version is one chunk of the agent's work. A new build opens a version "in progress", and
+    later builds replace it, until the agent runs `laitex checkpoint`, which seals it (and, in a
+    git repository, records the source; see git_snapshot). The first build kept is sealed at once.
     Two builds count as the same when they differ only in timestamps and the file ID."""
     KEEP = 40
 
     def __init__(self, st):
-        key = hashlib.sha1(st.pdf.encode()).hexdigest()[:12]
         self.st = st
-        self.dir = os.path.join(cache_root(), key + "-" + os.path.splitext(os.path.basename(st.pdf))[0])
+        self.key = hashlib.sha1(st.pdf.encode()).hexdigest()[:12]
+        self.stem = os.path.splitext(os.path.basename(st.pdf))[0]
+        self.dir = os.path.join(cache_root(), self.key + "-" + self.stem)
         self.index = os.path.join(self.dir, "versions.json")
         self.seen = None  # (mtime, size) of the last build looked at
-        self.lock = threading.Lock()  # the watcher and the request threads both write the index
 
     def list(self):
         return read_json(self.index, [])
@@ -329,14 +334,15 @@ class Versions:
         data = re.sub(rb"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]", b"", data)
         return hashlib.sha1(data).hexdigest()
 
-    def snapshot(self):
-        """Keep the current build if it is complete and new. Called about once a second."""
+    def snapshot(self, settle=True):
+        """Keep the current build if it is complete and new. The server calls this about once a
+        second (settle: skip a file written in the last second); `checkpoint` calls it directly."""
         try:
             stat = os.stat(self.st.pdf)
         except OSError:
             return
         sig = (stat.st_mtime, stat.st_size)
-        if sig == self.seen or time.time() - stat.st_mtime < 1:
+        if sig == self.seen or (settle and time.time() - stat.st_mtime < 1):
             return  # unchanged, or possibly still being written
         with open(self.st.pdf, "rb") as f:
             data = f.read()
@@ -344,33 +350,64 @@ class Versions:
             return  # an unfinished write; look again later
         self.seen = sig
         digest = self.digest(data)
-        with self.lock:
+        with self.st.lock():
             items = self.list()
             if items and items[-1]["digest"] == digest:
                 return
             os.makedirs(self.dir, exist_ok=True)
-            n = items[-1]["n"] + 1 if items else 1
+            open_ = items and not items[-1].get("sealed", True)
+            n = items[-1]["n"] if open_ else (items[-1]["n"] + 1 if items else 1)
             with open(self.path(n) + ".tmp", "wb") as f:
                 f.write(data)
             os.replace(self.path(n) + ".tmp", self.path(n))
-            items.append({"n": n, "time": utc_now(), "built": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(stat.st_mtime)),
-                          "size": len(data), "digest": digest})
+            item = {"n": n, "time": utc_now(), "built": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(stat.st_mtime)),
+                    "size": len(data), "digest": digest, "sealed": not items, "label": "" if items else "the first build kept"}
+            if open_:
+                items[-1] = item  # the version in progress gets the newer build
+            else:
+                items.append(item)
             for old in items[:-self.KEEP]:
                 with contextlib.suppress(OSError):
                     os.remove(self.path(old["n"]))
             write_json(self.index, items[-self.KEEP:])
 
-    def set_stats(self, n, stats):
-        """Store how much text build n changed against the one before. The viewer counts it,
-        since it is the side that reads the text; the server only keeps the numbers."""
-        keys = ("la", "ld", "ca", "cd", "changes")
-        clean = {k: int(stats.get(k) or 0) for k in keys}
-        with self.lock:
+    def seal(self, label, source):
+        """Close the version in progress. Returns its number, or None if there is none."""
+        with self.st.lock():
+            items = self.list()
+            if not items or items[-1].get("sealed", True):
+                return None
+            items[-1].update(sealed=True, label=label, sealed_at=utc_now())
+            if source:
+                items[-1]["source"] = source
+            write_json(self.index, items)
+            return items[-1]["n"]
+
+    def attach(self, n, source):
+        with self.st.lock():
             items = self.list()
             for i in items:
                 if i["n"] == n:
+                    i["source"] = source
+            write_json(self.index, items)
+
+    def set_stats(self, n, stats):
+        """Store how much text version n changed against the one before. The viewer counts it,
+        since it is the side that reads the text; the server only keeps the numbers."""
+        keys = ("la", "ld", "ca", "cd", "changes")
+        clean = {k: int(stats.get(k) or 0) for k in keys}
+        with self.st.lock():
+            items = self.list()
+            for i in items:
+                if i["n"] == n and i["digest"][:8] == str(stats.get("rev", i["digest"][:8])):
                     i["stats"] = clean
             write_json(self.index, items)
+
+    def public(self):
+        """The list as the viewer sees it."""
+        return [{"n": i["n"], "time": i["time"], "built": i.get("built"), "rev": i["digest"][:8],
+                 "sealed": i.get("sealed", True), "label": i.get("label", ""),
+                 "source": bool(i.get("source")), "stats": i.get("stats")} for i in self.list()]
 
     def watch(self):
         while True:
@@ -379,6 +416,61 @@ class Versions:
             except Exception as e:  # never let a bad build stop the server
                 print(f"laitex: version snapshot failed: {e}", file=sys.stderr, flush=True)
             time.sleep(1)
+
+
+# ---- source snapshots in git, for rollback -------------------------------------
+
+def git(root, *args, env=None, check=True):
+    r = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True, env=env)
+    if check and r.returncode:
+        raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
+def git_root(path):
+    r = subprocess.run(["git", "-C", os.path.dirname(path), "rev-parse", "--show-toplevel"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+GIT_ID = {"GIT_AUTHOR_NAME": "laitex", "GIT_AUTHOR_EMAIL": "laitex@localhost",
+          "GIT_COMMITTER_NAME": "laitex", "GIT_COMMITTER_EMAIL": "laitex@localhost"}
+
+
+def worktree_tree(root, pdf):
+    """A git tree of the files as they are now: every file git would see (tracked, or untracked
+    and not ignored), except the PDF. Built with a temporary index, so the real index, the
+    branch and the working tree are untouched."""
+    with tempfile.TemporaryDirectory() as tmp:
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(tmp, "index"))
+        real = os.path.join(root, git(root, "rev-parse", "--git-path", "index"))
+        if os.path.exists(real):
+            shutil.copy(real, env["GIT_INDEX_FILE"])  # its file stats make `add` fast
+        git(root, "add", "-A", env=env)
+        git(root, "rm", "--cached", "-q", "--ignore-unmatch", "--", pdf, env=env)
+        return git(root, "write-tree", env=env)
+
+
+def git_snapshot(versions, n, label):
+    """Record the source as it is now, for rolling back to version n. The PDF itself is left
+    out, since the cache already keeps it. It goes into a commit under refs/laitex/, which is on
+    no branch and which `git push` does not send."""
+    root = git_root(versions.st.pdf)
+    if not root:
+        return None
+    pdf = os.path.relpath(versions.st.pdf, root)
+    tree = worktree_tree(root, pdf)
+    head = git(root, "rev-parse", "-q", "--verify", "HEAD", check=False)
+    commit = git(root, "commit-tree", tree, *(["-p", head] if head else []),
+                 "-m", f"laitex v{n}: {label or 'checkpoint'}", env=dict(os.environ, **GIT_ID))
+    ref = f"refs/laitex/{versions.stem}-{versions.key[:6]}/v{n}"
+    git(root, "update-ref", ref, commit)
+    # Drop the snapshots of versions no longer kept.
+    kept = {f"v{i['n']}" for i in versions.list()} | {f"v{n}"}
+    for old in git(root, "for-each-ref", "--format=%(refname)", ref.rsplit("/", 1)[0] + "/").split():
+        if old.rsplit("/", 1)[1] not in kept:
+            git(root, "update-ref", "-d", old, check=False)
+    return {"root": root, "commit": commit, "ref": ref, "pdf": pdf}
 
 
 def public(c):
@@ -460,7 +552,7 @@ def make_handler(st, agent_name, versions):
                 with st.lock():
                     return self.send(200, st.load())
             if path == "/api/versions":
-                return self.send(200, [{k: v for k, v in i.items() if k != "digest"} for i in versions.list()])
+                return self.send(200, versions.public())
             m = re.fullmatch(r"/version/(\d+)\.pdf", path)
             if m:
                 try:
@@ -498,10 +590,13 @@ def make_handler(st, agent_name, versions):
             if self.path == "/api/request":
                 # A request to the agent. The viewer never edits files or runs git;
                 # `laitex wait` on the agent side picks this file up.
-                action = self.body().get("action", "comments")
+                data = self.body()
+                action = data.get("action", "comments")
                 with st.lock():
                     n = sum(1 for c in st.load() if c.get("status") == "open")
                     req = {"id": uuid.uuid4().hex[:8], "time": now(), "action": action, "open": n}
+                    if action == "rollback":
+                        req["version"] = int(data.get("version") or 0)
                     write_json(st.request, req)
                 return self.send(200, req)
             if self.path != "/api/comments":
@@ -619,6 +714,13 @@ def cmd_open(a):
                 break
         else:
             sys.exit(f"laitex: server did not start, see {st.log}")
+    # Keep the build the review starts from, with its source, so it can be rolled back to.
+    versions = Versions(st)
+    versions.snapshot(settle=False)
+    items = versions.list()
+    if len(items) == 1 and not items[0].get("source"):
+        with contextlib.suppress(RuntimeError, OSError):
+            versions.attach(1, git_snapshot(versions, 1, "the first build kept"))
     if not a.no_browser:
         open_browser(url, a.app)
     print(url)
@@ -730,9 +832,56 @@ def cmd_say(a):
 
 def cmd_done(a):
     st = State(a.pdf)
-    with st.lock(), contextlib.suppress(OSError):
-        os.remove(st.request)
+    with st.lock():
+        req = st.get_request()
+        if req and req.get("taken"):  # a request sent meanwhile is still waiting for `wait`
+            with contextlib.suppress(OSError):
+                os.remove(st.request)
     print("done")
+
+
+def cmd_checkpoint(a):
+    """Seal the version in progress, so the history shows this chunk of work as one version,
+    and record the source for rolling back to it."""
+    st = State(a.pdf)
+    versions = Versions(st)
+    versions.snapshot(settle=False)  # the build just made, even if the server has not seen it yet
+    items = versions.list()
+    if not items or items[-1].get("sealed", True):
+        print(f"laitex: no new build since v{items[-1]['n']}; nothing to keep" if items else "laitex: no build yet")
+        return
+    n = items[-1]["n"]
+    try:
+        source = git_snapshot(versions, n, a.message)
+    except (RuntimeError, OSError) as e:
+        print(f"laitex: could not record the source in git ({e}); v{n} is kept without rollback", file=sys.stderr)
+        source = None
+    versions.seal(a.message, source)
+    print(f"v{n}" + (f", source in {source['ref']}" if source else ", no source snapshot (not a git repository)"))
+
+
+def cmd_rollback(a):
+    """Restore the source files of version n into the working tree. HEAD and the index are left
+    alone, so the result shows up as ordinary uncommitted changes."""
+    st = State(a.pdf)
+    v = next((i for i in Versions(st).list() if i["n"] == a.version), None)
+    if not v:
+        sys.exit(f"laitex: no version {a.version}")
+    src = v.get("source")
+    if not src:
+        sys.exit(f"laitex: v{a.version} has no source snapshot (it was kept outside a git repository, "
+                 "or before laitex recorded sources); roll back by other means")
+    root, commit = src["root"], src["commit"]
+    spec = [".", f":(exclude){src['pdf']}"]
+    lines = git(root, "diff", "--name-status", "--no-renames", worktree_tree(root, src["pdf"]), commit).splitlines()
+    tracked = set(git(root, "ls-files").splitlines())
+    git(root, "restore", f"--source={commit}", "--worktree", "--", *spec)
+    print(f"restored the source of v{a.version} ({commit[:10]}) in {root}")
+    restored = [l for l in lines if l.split("\t", 1)[1] in tracked or not l.startswith("D")]
+    left = [l.split("\t", 1)[1] for l in lines if l.startswith("D") and l.split("\t", 1)[1] not in tracked]
+    print("\n".join(restored) if restored else "no files differed")
+    if left:
+        print("not in that version, untracked, left in place: " + ", ".join(left))
 
 
 def cmd_install_skill(a):
@@ -790,6 +939,10 @@ def main(argv=None):
     s = pdf_cmd("say", cmd_say, "answer in the viewer's chat panel")
     s.add_argument("text", help="message text, or - to read it from stdin")
     pdf_cmd("done", cmd_done, "mark the current request as handled")
+    s = pdf_cmd("checkpoint", cmd_checkpoint, "seal the current build as one version, recording the source")
+    s.add_argument("-m", "--message", default="", help="a one-line summary of the work, shown in the history")
+    s = pdf_cmd("rollback", cmd_rollback, "restore the source of a version into the working tree")
+    s.add_argument("version", type=int)
     sub.add_parser("guide", help="print the instructions for the agent").set_defaults(fn=cmd_guide)
     s = sub.add_parser("install-skill", help="install the agent skill (default: ~/.claude/skills)")
     s.add_argument("--project", action="store_true", help="install into ./.claude/skills")
