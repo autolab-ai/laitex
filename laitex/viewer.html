@@ -295,7 +295,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
 <button id="back" title="Back (Alt+Left)">&larr; back</button>
 <div id="pop">
   <textarea id="popText"></textarea>
-  <div class="btns"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popCancel">Cancel</button><button id="popAsk" title="Send it to the agent in the chat, with the selected text">Ask in chat</button><button id="popSave" title="Keep it as a review comment">Comment</button></div>
+  <div class="btns"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popCancel">Cancel</button><button id="popSave" title="Keep it as a review comment">Comment</button></div>
 </div>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -853,7 +853,6 @@ function openPop(r) {
   const chat = sideTab === "chat";
   popText.placeholder = chat ? "Enter: ask in the chat · Shift+Enter: new line · Esc: cancel"
                              : "Enter: save the comment · Shift+Enter: new line · Cmd+Enter: save and send · Esc: cancel";
-  document.getElementById("popAsk").classList.toggle("main", chat);
   document.getElementById("popSave").classList.toggle("main", !chat);
   pop.style.display = "block"; popText.value = "";
   drawHighlights();  // keep the selected text marked while typing
@@ -921,7 +920,7 @@ async function askPop() {
   if (sideTab !== "chat") setTab("chat");
   chatLog.scrollTop = chatLog.scrollHeight; pollChat();
 }
-document.getElementById("popAsk").onclick = askPop;
+
 // The comment box takes focus, so the page selection is no longer what the browser copies.
 // Copy the selected PDF text instead: with the button, or with the system's copy shortcut or
 // Edit menu while nothing is selected inside the comment box.
