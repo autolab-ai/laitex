@@ -241,7 +241,7 @@ darkQuery.addEventListener("change", applyTheme);
       <div>
         <h4>Anywhere</h4>
         <table>
-          <tr><td><kbd>r</kbd> <kbd>c</kbd> <kbd>H</kbd></td><td>Review, Chat, History tab</td></tr>
+          <tr><td><kbd>R</kbd> <kbd>C</kbd> <kbd>H</kbd></td><td>Review, Chat, History tab</td></tr>
           <tr><td><kbd>h</kbd> <kbd>?</kbd></td><td>this list</td></tr>
           <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>scroll the pages down, up</td></tr>
           <tr><td><kbd>Space</kbd> <kbd>Shift+Space</kbd></td><td>a screen down, up</td></tr>
@@ -253,7 +253,7 @@ darkQuery.addEventListener("change", applyTheme);
         </table>
         <h4>Chat</h4>
         <table>
-          <tr><td><kbd>c</kbd></td><td>go to the message box</td></tr>
+          <tr><td><kbd>C</kbd></td><td>go to the message box</td></tr>
           <tr><td><kbd>Enter</kbd> <kbd>Shift+Enter</kbd></td><td>send, new line</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>leave the message box</td></tr>
         </table>
@@ -1694,7 +1694,7 @@ window.addEventListener("keydown", e => {
   const sc = scroller(), key = e.key;
   const keys = {
     h: () => setHelp(true), "?": () => setHelp(true),
-    r: () => setTab("review"), c: () => setTab("chat"), H: () => setTab("history"),
+    R: () => setTab("review"), C: () => setTab("chat"), H: () => setTab("history"),
     d: () => document.getElementById("themeBtn").click(),
     j: () => sc.scrollBy({ top: 90 }), k: () => sc.scrollBy({ top: -90 }),
     " ": () => sc.scrollBy({ top: (e.shiftKey ? -0.9 : 0.9) * sc.clientHeight }),
