@@ -315,6 +315,7 @@ class Versions:
         self.dir = os.path.join(cache_root(), key + "-" + os.path.splitext(os.path.basename(st.pdf))[0])
         self.index = os.path.join(self.dir, "versions.json")
         self.seen = None  # (mtime, size) of the last build looked at
+        self.lock = threading.Lock()  # the watcher and the request threads both write the index
 
     def list(self):
         return read_json(self.index, [])
@@ -342,21 +343,34 @@ class Versions:
         if b"%%EOF" not in data[-2048:] or len(data) != stat.st_size:
             return  # an unfinished write; look again later
         self.seen = sig
-        items = self.list()
         digest = self.digest(data)
-        if items and items[-1]["digest"] == digest:
-            return
-        os.makedirs(self.dir, exist_ok=True)
-        n = items[-1]["n"] + 1 if items else 1
-        with open(self.path(n) + ".tmp", "wb") as f:
-            f.write(data)
-        os.replace(self.path(n) + ".tmp", self.path(n))
-        items.append({"n": n, "time": utc_now(), "built": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(stat.st_mtime)),
-                      "size": len(data), "digest": digest})
-        for old in items[:-self.KEEP]:
-            with contextlib.suppress(OSError):
-                os.remove(self.path(old["n"]))
-        write_json(self.index, items[-self.KEEP:])
+        with self.lock:
+            items = self.list()
+            if items and items[-1]["digest"] == digest:
+                return
+            os.makedirs(self.dir, exist_ok=True)
+            n = items[-1]["n"] + 1 if items else 1
+            with open(self.path(n) + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(self.path(n) + ".tmp", self.path(n))
+            items.append({"n": n, "time": utc_now(), "built": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(stat.st_mtime)),
+                          "size": len(data), "digest": digest})
+            for old in items[:-self.KEEP]:
+                with contextlib.suppress(OSError):
+                    os.remove(self.path(old["n"]))
+            write_json(self.index, items[-self.KEEP:])
+
+    def set_stats(self, n, stats):
+        """Store how much text build n changed against the one before. The viewer counts it,
+        since it is the side that reads the text; the server only keeps the numbers."""
+        keys = ("la", "ld", "ca", "cd", "changes")
+        clean = {k: int(stats.get(k) or 0) for k in keys}
+        with self.lock:
+            items = self.list()
+            for i in items:
+                if i["n"] == n:
+                    i["stats"] = clean
+            write_json(self.index, items)
 
     def watch(self):
         while True:
@@ -467,6 +481,10 @@ def make_handler(st, agent_name, versions):
         def do_POST(self):
             if not self.allowed(write=True):
                 return self.send(403, {"error": "forbidden"})
+            m = re.fullmatch(r"/api/versions/(\d+)/stats", self.path)
+            if m:
+                versions.set_stats(int(m.group(1)), self.body())
+                return self.send(200, {"ok": True})
             if self.path == "/api/chat":
                 data = self.body()
                 text = (data.get("text") or "").strip()

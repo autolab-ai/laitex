@@ -83,22 +83,31 @@
   #pop .btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   #pop #popCopy { margin-right: auto; }
   button { font: inherit; padding: 3px 10px; }
-  /* history: every build, and the changes between two of them, over the page area */
+  /* history: the panel's History tab picks the builds; the comparison covers the page area */
   #hist { position: fixed; left: 0; top: 0; bottom: 0; right: calc(var(--side) + var(--chatw)); z-index: 6;
-          display: none; flex-direction: column; background: var(--bg); }
-  #hist.open { display: flex; }
-  #histBar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 12px;
-             background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; }
-  #histBar select { font: inherit; max-width: 210px; }
-  #histBar .seg button { padding: 2px 8px; }
-  #histBar .seg button.on { background: var(--answered); color: #fff; border-color: var(--answered); }
+          display: none; background: var(--bg); }
+  #hist.open { display: block; }
+  #histPages { position: absolute; inset: 0; overflow: auto; padding: 16px 20px 40vh; }
+  #histPages > .note { color: var(--muted); padding: 20px; }
+  #histCtl { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 8px;
+             padding: 4px 12px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  #histCtl select { font: inherit; min-width: 0; width: 100%; }
+  #histCtl .row { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #histCtl .seg button { padding: 2px 8px; }
+  #histCtl .seg button.on { background: var(--answered); color: #fff; border-color: var(--answered); }
   #histSum { color: var(--muted); }
-  #histBody { flex: 1; min-height: 0; display: flex; }
-  #histPages { flex: 1; overflow: auto; padding: 16px 20px 40vh; }
-  #histList { flex: none; width: 290px; overflow-y: auto; padding: 6px 10px 20px; font-size: 12px;
-              background: var(--panel); border-left: 1px solid var(--line); }
+  #histList { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 20px; font-size: 12px; }
   #histList .note { color: var(--muted); padding: 8px 2px; line-height: 1.45; }
   #histList h4 { margin: 10px 0 4px; font-size: 12px; }
+  .ver { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; }
+  .ver.on { border-color: #d97757; cursor: default; }
+  .ver .vt { display: flex; justify-content: space-between; gap: 8px; }
+  .ver .vt b { font-weight: 600; }
+  .ver .vt span { color: var(--faint); }
+  .ver .vs { margin-top: 2px; color: var(--muted); }
+  .ver .vs .p { color: var(--ins-fg); }
+  .ver .vs .m { color: var(--del-fg); }
+  .ver .vd { margin-top: 6px; border-top: 1px solid var(--line); }
   .hk { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
   .hk:hover, .hk.on { background: var(--card); }
   .hk .pg { color: var(--faint); font-size: 11px; margin-right: 4px; }
@@ -116,12 +125,17 @@
   .chg i.dmark { width: 3px; margin-left: -2px; background: var(--del-fg); }
   .chg i.flash { outline: 2px solid #d97757; outline-offset: 1px; }
   /* the chat with the agent, between the pages and the comments; hidden until opened */
-  :root.chat-open { --chatw: 400px; }
+  :root.dock-open { --chatw: 400px; }
   #chat { position: fixed; top: 0; bottom: 0; right: var(--side); width: var(--chatw); display: none;
           flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); }
-  :root.chat-open #chat { display: flex; }
-  #chatHead { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
-  #chatHead b { font-size: 14px; }
+  :root.dock-open #chat { display: flex; }
+  #chatHead { display: flex; align-items: center; gap: 8px; padding: 8px 12px 6px; }
+  #chatHead .tabs button { font-weight: 600; border: 0; background: none; color: var(--muted); padding: 3px 6px;
+                           border-bottom: 2px solid transparent; cursor: pointer; }
+  #chatHead .tabs button.on { color: var(--fg); border-bottom-color: #d97757; }
+  #chatTab, #histTab { flex: 1; min-height: 0; display: none; flex-direction: column; }
+  #chat[data-tab="chat"] #chatTab, #chat[data-tab="history"] #histTab { display: flex; }
+  #chat:not([data-tab="chat"]) #chatMode { visibility: hidden; }
   #chatMode { flex: 1; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #chatLog { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
   .m { margin: 8px 0; line-height: 1.45; overflow-wrap: anywhere; }
@@ -156,31 +170,37 @@ try { theme = localStorage.getItem("theme"); } catch (e) {}
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
 function applyTheme() { document.documentElement.classList.toggle("dark", theme ? theme === "dark" : darkQuery.matches); }
 applyTheme();
-try { if (localStorage.getItem("chat") === "1") document.documentElement.classList.add("chat-open"); } catch (e) {}
+try { if (localStorage.getItem("dock")) document.documentElement.classList.add("dock-open"); } catch (e) {}
 darkQuery.addEventListener("change", applyTheme);
 </script>
 </head>
 <body>
 <div id="main"><div id="pages"></div></div>
-<div id="hist">
-  <div id="histBar">
-    <b>History</b>
-    <select id="histB" title="The build to show"></select>
-    <span>compared with</span>
-    <select id="histA" title="The build to compare it with"></select>
-    <span class="seg"><button id="histSingle" title="The newer build, with added words in green and removals marked in red">changes</button><button id="histSide" title="Both builds side by side">side by side</button></span>
-    <label><input type="checkbox" id="histOnly"> changed pages only</label>
-    <span id="histSum"></span>
-    <button id="histClose" title="Back to the document (Esc)" style="margin-left:auto">&times;</button>
+<div id="hist"><div id="histPages"></div></div>
+<div id="chat" data-tab="chat">
+  <div id="chatHead">
+    <span class="tabs"><button id="tabChat">Chat</button><button id="tabHist">History</button></span>
+    <span id="chatMode"></span>
+    <button id="chatClose" title="Hide the panel">&times;</button>
   </div>
-  <div id="histBody"><div id="histPages"></div><div id="histList"></div></div>
-</div>
-<div id="chat">
-  <div id="chatHead"><b>Chat</b><span id="chatMode"></span><button id="chatClose" title="Hide the chat">&times;</button></div>
-  <div id="chatLog"></div>
-  <div id="chatForm">
-    <textarea id="chatInput" placeholder="Message the agent. Enter: send, Shift+Enter: new line"></textarea>
-    <div id="chatNote"></div>
+  <div id="chatTab">
+    <div id="chatLog"></div>
+    <div id="chatForm">
+      <textarea id="chatInput" placeholder="Message the agent. Enter: send, Shift+Enter: new line"></textarea>
+      <div id="chatNote"></div>
+    </div>
+  </div>
+  <div id="histTab">
+    <div id="histCtl">
+      <span>show</span><select id="histB" title="The build to show"></select>
+      <span>against</span><select id="histA" title="The build to compare it with"></select>
+      <div class="row">
+        <span class="seg"><button id="histSingle" title="The newer build, with added words in green and removals marked in red">changes</button><button id="histSide" title="Both builds side by side">side by side</button></span>
+        <label><input type="checkbox" id="histOnly"> changed pages only</label>
+      </div>
+      <div class="row" id="histSum"></div>
+    </div>
+    <div id="histList"></div>
   </div>
 </div>
 <div id="side">
@@ -212,8 +232,8 @@ darkQuery.addEventListener("change", applyTheme);
       <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd + / &minus; / 0</kbd></td><td>zoom in / out / fit (or pinch)</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Alt+&larr;</kbd></td><td>back after following a link</td></tr>
-      <tr><td style="padding:2px 8px 2px 0">history</td><td>every build, and what changed between two</td></tr>
-      <tr><td style="padding:2px 8px 2px 0">chat</td><td>talk to <span class="an">the agent</span> (hide it again with &times;)</td></tr>
+      <tr><td style="padding:2px 8px 2px 0">history</td><td>every build, and what changed in each</td></tr>
+      <tr><td style="padding:2px 8px 2px 0">chat</td><td>talk to <span class="an">the agent</span> (&times; hides the panel)</td></tr>
     </table>
   </details>
 </div>
@@ -1105,7 +1125,8 @@ function histDoc(n) {
       const d = await pdfjsLib.getDocument({ url: `/version/${n}.pdf` }).promise;
       return { d, ...(await docWords(d)) };
     })());
-    for (const k of [...histDocs.keys()].slice(0, -4)) {  // keep a few builds in memory
+    for (const k of [...histDocs.keys()].slice(0, -4)) {  // keep a few builds in memory, and the two on show
+      if (cmp && (k === cmp.a || k === cmp.b)) continue;
       histDocs.get(k).then(v => v.d.destroy()).catch(() => {});
       histDocs.delete(k);
     }
@@ -1126,14 +1147,52 @@ function textOf(toks, i0, i1, max = 220) {
   const t = toks.slice(i0, i1).map(t => t.w).join(" ");
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
+// The build before n, or 0 for the first one kept.
+const prevOf = n => { const i = histVersions.findIndex(v => v.n === n); return i > 0 ? histVersions[i - 1].n : 0; };
+// How much text a build changed: lines of the PDF that hold an added or removed word, and the
+// characters of those words. The viewer only sees the PDF, so these count rendered text, not source.
+function statsOf(A, B, d) {
+  const count = (toks, ranges) => {
+    const lines = new Set(); let chars = 0;
+    for (const [i0, i1] of ranges) for (let i = i0; i < i1; i++) {
+      chars += toks[i].w.length;
+      for (const bx of toks[i].boxes) lines.add(bx.n + ":" + Math.round(bx.y * 400));
+    }
+    return [lines.size, chars];
+  };
+  const [ld, cd] = count(A.toks, d.raw.map(h => [h.a0, h.a1])), [la, ca] = count(B.toks, d.raw.map(h => [h.b0, h.b1]));
+  return { la, ld, ca, cd, changes: d.merged.length };
+}
+async function saveStats(n, st) {
+  const v = histVersions.find(v => v.n === n);
+  if (v) v.stats = st;
+  try { await fetch(`/api/versions/${n}/stats`, { method: "POST", headers: H, body: JSON.stringify(st) }); } catch (e) {}
+}
+// Count the builds that have no counts yet, newest first, while the History tab is open.
+let statsRunning = false;
+async function fillStats() {
+  if (statsRunning) return;
+  statsRunning = true;
+  try {
+    for (const v of histVersions.slice().reverse()) {
+      const p = prevOf(v.n);
+      if (!histOpen) break;
+      if (v.stats || !p) continue;
+      const [A, B] = await Promise.all([histDoc(p), histDoc(v.n)]);
+      if (!v.stats) await saveStats(v.n, statsOf(A, B, wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
+      histRenderList();
+    }
+  } catch (e) { console.error(e); } finally { statsRunning = false; }
+}
 async function histShow() {
   const tok = ++histToken, b = +histB.value, a = +histA.value;
   if (histObs) histObs.disconnect();
-  histPages.replaceChildren(); histList.replaceChildren(); cmp = null;
+  histPages.replaceChildren(); cmp = null;
+  histRenderList();
   document.getElementById("histSingle").classList.toggle("on", histMode === "single");
   document.getElementById("histSide").classList.toggle("on", histMode === "side");
   if (!b) {
-    histList.innerHTML = "<div class='note'>No builds yet. laitex keeps a copy of every build of the PDF from the moment the viewer starts.</div>";
+    document.getElementById("histSum").textContent = "";
     return;
   }
   document.getElementById("histSum").textContent = "comparing…";
@@ -1167,8 +1226,10 @@ async function histShow() {
   for (const m of aMark) if (m >= 0) minus++;
   document.getElementById("histSum").textContent = A
     ? `${hunks.length} change${hunks.length === 1 ? "" : "s"}, +${plus} −${minus} words` : "";
+  const v = histVersions.find(v => v.n === b);
+  if (A && a === prevOf(b) && v && !v.stats) saveStats(b, statsOf(A, B, raw));
   histLayout();
-  histFillList();
+  histRenderList();
 }
 // Pages with a change, per side.
 function changedPages(side) {
@@ -1258,38 +1319,69 @@ async function histRender(div, tok) {
   layer.addEventListener("click", e => { if (e.target.dataset.h !== undefined) histFocus(+e.target.dataset.h, false); });
   div.append(layer);
 }
-// The list of changes, and the comments answered with this build.
-function histFillList() {
+// The builds, newest first, each with how much text it changed. The selected one opens to list
+// its changes and the comments answered with it; clicking another compares it with the build before.
+function histRenderList() {
+  const top = histList.scrollTop, sel = +histB.value;
   histList.replaceChildren();
+  if (!histVersions.length) {
+    const n = document.createElement("div"); n.className = "note";
+    n.textContent = "No builds yet. laitex keeps a copy of every build of the PDF from the moment the viewer starts.";
+    histList.append(n); return;
+  }
+  const latest = histVersions[histVersions.length - 1].n, first = histVersions[0].n;
+  for (const v of histVersions.slice().reverse()) {
+    const row = document.createElement("div"); row.className = "ver" + (v.n === sel ? " on" : "");
+    const t = document.createElement("div"); t.className = "vt";
+    const name = document.createElement("b"); name.textContent = `v${v.n}` + (v.n === latest ? " (current)" : "");
+    const when = document.createElement("span");
+    when.textContent = vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    t.append(name, when);
+    const st = document.createElement("div"); st.className = "vs";
+    if (v.stats) {
+      const x = v.stats, num = (cls, sign, k) => `<span class="${cls}">${sign}${Number(x[k]) || 0}</span>`;
+      st.innerHTML = Number(x.changes) ? `${num("p", "+", "la")} ${num("m", "−", "ld")} lines · ${num("p", "+", "ca")} ${num("m", "−", "cd")} characters`
+                                        : "no text changes";
+    } else st.textContent = v.n === first ? "the first build kept" : "counting…";
+    row.append(t, st);
+    if (v.n === sel) { if (cmp && cmp.b === sel) row.append(histDetails()); }
+    else row.onclick = () => { histB.value = v.n; histA.value = prevOf(v.n); histShow(); };
+    histList.append(row);
+  }
+  histList.scrollTop = top;
+}
+function histDetails() {
+  const box = document.createElement("div"); box.className = "vd";
+  const add = (tag, text, cls) => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; box.append(e); return e; };
+  if (cmp.a && cmp.a !== prevOf(cmp.b)) add("div", `compared with v${cmp.a}`, "note");
   const vs = histVersions, iB = vs.findIndex(v => v.n === cmp.b), iA = vs.findIndex(v => v.n === cmp.a);
   const from = vTime(vs[iA >= 0 ? iA + 1 : iB]), to = vs[iB + 1] ? vTime(vs[iB + 1]) : new Date(8.64e15);
   const answered = comments.filter(c => c.replied && c.reply && (t => t >= from && t < to)(new Date(c.replied.replace(" ", "T"))));
   if (answered.length) {
-    const h = document.createElement("h4"); h.textContent = "Comments answered with this build"; histList.append(h);
+    add("h4", "Comments answered with this build");
     for (const c of answered) {
-      const e = document.createElement("div"); e.className = "hk cm";
+      const e = add("div", "", "hk cm");
       const q = document.createElement("div"); q.style.fontStyle = "italic"; q.style.color = "var(--muted)";
       q.textContent = (c.quote || "").slice(0, 90) + ((c.quote || "").length > 90 ? "…" : "");
       const r = document.createElement("div"); r.textContent = c.comment.slice(0, 160) + (c.comment.length > 160 ? "…" : "");
-      e.append(q, r); histList.append(e);
+      e.append(q, r);
     }
   }
   if (!cmp.A) {
-    const n = document.createElement("div"); n.className = "note";
-    n.textContent = histVersions.length < 2 ? "This is the only build so far. laitex keeps every new build from now on; the next rebuild shows up here with its changes."
-                                           : "Pick a build to compare with to see what changed.";
-    histList.append(n); return;
+    add("div", histVersions.length < 2 ? "The only build so far. Each new build shows up here with what it changed."
+                                       : "Pick a build to compare with to see what changed.", "note");
+    return box;
   }
-  const h = document.createElement("h4"); h.textContent = cmp.hunks.length ? "Changes" : "No text changes"; histList.append(h);
+  add("h4", cmp.hunks.length ? "Changes" : "No text changes");
   cmp.hunks.forEach((hk, k) => {
-    const e = document.createElement("div"); e.className = "hk"; e.dataset.h = k;
+    const e = add("div", "", "hk"); e.dataset.h = k;
     const pg = document.createElement("span"); pg.className = "pg"; pg.textContent = "p." + (hk.anchor || hk.aAnchor || { n: "?" }).n;
     e.append(pg);
     if (hk.del) { const d = document.createElement("del"); d.textContent = hk.old; e.append(d, " "); }
     if (hk.ins) { const s = document.createElement("ins"); s.textContent = hk.new; e.append(s); }
     e.onclick = () => histFocus(k, true);
-    histList.append(e);
   });
+  return box;
 }
 function histFocus(k, scroll) {
   histList.querySelectorAll(".hk.on").forEach(e => e.classList.remove("on"));
@@ -1304,28 +1396,30 @@ function histFocus(k, scroll) {
 }
 let histPoll = null;
 async function setHist(open) {
+  if (open === histOpen) return;
   histOpen = open;
   hist.classList.toggle("open", open);
   clearInterval(histPoll);
-  if (!open) { histToken++; if (histObs) histObs.disconnect(); histPages.replaceChildren(); tip.style.display = "none"; return; }
-  await histLoad(false);
+  if (!open) { histToken++; if (histObs) histObs.disconnect(); histPages.replaceChildren(); cmp = null; tip.style.display = "none"; return; }
+  await histLoad(true);  // coming back to the tab keeps the builds that were picked
   histShow();
-  // A new build while the history is open: follow it if the newest build is on show.
+  fillStats();
+  // A new build while the history is open: list it, and follow it if the newest build is on show.
   histPoll = setInterval(async () => {
     const before = histVersions.length ? histVersions[histVersions.length - 1].n : 0, wasLatest = +histB.value === before;
     await histLoad(true);
     const now_ = histVersions.length ? histVersions[histVersions.length - 1].n : 0;
-    if (now_ !== before && wasLatest) { histB.value = now_; histA.value = before; histShow(); }
+    if (now_ === before) return;
+    if (wasLatest) { histB.value = now_; histA.value = before; histShow(); } else histRenderList();
+    fillStats();
   }, 3000);
 }
-document.getElementById("histBtn").onclick = () => setHist(!histOpen);
-document.getElementById("histClose").onclick = () => setHist(false);
 histA.onchange = histB.onchange = () => histShow();
 document.getElementById("histSingle").onclick = () => { histMode = "single"; try { localStorage.setItem("histMode", histMode); } catch (e) {} histShow(); };
 document.getElementById("histSide").onclick = () => { histMode = "side"; try { localStorage.setItem("histMode", histMode); } catch (e) {} histShow(); };
 document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
 histPages.addEventListener("scroll", () => { tip.style.display = "none"; });
-window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setHist(false); });
+window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setDock(null); });
 
 // ---- chat with the agent ----
 // When laitex can read the agent's session transcript, the panel mirrors that session, so it
@@ -1334,7 +1428,7 @@ window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && 
 const chatLog = document.getElementById("chatLog"), chatInput = document.getElementById("chatInput");
 const chatBtn = document.getElementById("chatBtn"), chatNote = document.getElementById("chatNote");
 let chatEpoch = "", chatSeq = 0, chatTimer = null;
-let chatOpen = document.documentElement.classList.contains("chat-open");
+let chatOpen = false, dockTab = null;  // the panel's tab: "chat", "history", or null when it is hidden
 const escHtml = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function mdInline(t) {
   return t.split(/(`[^`]*`)/).map((part, k) => k % 2 ? "<code>" + escHtml(part.slice(1, -1)) + "</code>"
@@ -1427,14 +1521,21 @@ async function pollChat() {
   } catch (e) {}
   chatTimer = setTimeout(pollChat, chatOpen ? 1500 : 5000);
 }
-function setChat(open) {
-  chatOpen = open;
-  try { localStorage.setItem("chat", open ? "1" : "0"); } catch (e) {}
-  document.documentElement.classList.toggle("chat-open", open);
-  chatBtn.classList.remove("unread");
-  gen++; layout(); renderVisible();  // the pages get narrower or wider
-  if (open) { chatLog.scrollTop = chatLog.scrollHeight; chatInput.focus(); }
+const dock = document.getElementById("chat");
+function setDock(tab) {
+  const was = dockTab;
+  dockTab = tab;
+  try { localStorage.setItem("dock", tab || ""); } catch (e) {}
+  document.documentElement.classList.toggle("dock-open", !!tab);
+  dock.dataset.tab = tab || "";
+  document.getElementById("tabChat").classList.toggle("on", tab === "chat");
+  document.getElementById("tabHist").classList.toggle("on", tab === "history");
+  chatOpen = tab === "chat";
+  if (chatOpen) chatBtn.classList.remove("unread");
+  if (!was !== !tab) { gen++; layout(); renderVisible(); }  // the pages get narrower or wider
+  if (chatOpen) { chatLog.scrollTop = chatLog.scrollHeight; chatInput.focus(); }
   pollChat();
+  setHist(tab === "history");
 }
 async function sendChat() {
   const text = chatInput.value.trim();
@@ -1449,9 +1550,12 @@ chatInput.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
   else if (e.key === "Escape") chatInput.blur();
 });
-chatBtn.onclick = () => setChat(!chatOpen);
-document.getElementById("chatClose").onclick = () => setChat(false);
-pollChat();
+chatBtn.onclick = () => setDock(dockTab === "chat" ? null : "chat");
+document.getElementById("histBtn").onclick = () => setDock(dockTab === "history" ? null : "history");
+document.getElementById("tabChat").onclick = () => setDock("chat");
+document.getElementById("tabHist").onclick = () => setDock("history");
+document.getElementById("chatClose").onclick = () => setDock(null);
+try { setDock(localStorage.getItem("dock") || null); } catch (e) { setDock(null); }
 poll();
 </script>
 </body>
