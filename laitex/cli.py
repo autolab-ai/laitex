@@ -8,6 +8,7 @@ The viewer itself never edits your files or runs git.
 import argparse
 import contextlib
 import glob
+import hashlib
 import json
 import os
 import re
@@ -294,6 +295,78 @@ class Mirror:
             return [i for i in self.items if i["seq"] > after]
 
 
+# ---- versions: a copy of every build, for the history view --------------------
+
+def cache_root():
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Caches/laitex")
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "laitex")
+
+
+class Versions:
+    """Every distinct build of the PDF, kept in the user's cache folder rather than next to
+    the PDF: builds can be large, and the PDF often sits in a synced or versioned folder.
+    Two builds count as the same when they differ only in timestamps and the file ID."""
+    KEEP = 40
+
+    def __init__(self, st):
+        key = hashlib.sha1(st.pdf.encode()).hexdigest()[:12]
+        self.st = st
+        self.dir = os.path.join(cache_root(), key + "-" + os.path.splitext(os.path.basename(st.pdf))[0])
+        self.index = os.path.join(self.dir, "versions.json")
+        self.seen = None  # (mtime, size) of the last build looked at
+
+    def list(self):
+        return read_json(self.index, [])
+
+    def path(self, n):
+        return os.path.join(self.dir, f"v{int(n)}.pdf")
+
+    @staticmethod
+    def digest(data):
+        data = re.sub(rb"/(CreationDate|ModDate)\s*\(D:[^)]*\)", b"", data)
+        data = re.sub(rb"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]", b"", data)
+        return hashlib.sha1(data).hexdigest()
+
+    def snapshot(self):
+        """Keep the current build if it is complete and new. Called about once a second."""
+        try:
+            stat = os.stat(self.st.pdf)
+        except OSError:
+            return
+        sig = (stat.st_mtime, stat.st_size)
+        if sig == self.seen or time.time() - stat.st_mtime < 1:
+            return  # unchanged, or possibly still being written
+        with open(self.st.pdf, "rb") as f:
+            data = f.read()
+        if b"%%EOF" not in data[-2048:] or len(data) != stat.st_size:
+            return  # an unfinished write; look again later
+        self.seen = sig
+        items = self.list()
+        digest = self.digest(data)
+        if items and items[-1]["digest"] == digest:
+            return
+        os.makedirs(self.dir, exist_ok=True)
+        n = items[-1]["n"] + 1 if items else 1
+        with open(self.path(n) + ".tmp", "wb") as f:
+            f.write(data)
+        os.replace(self.path(n) + ".tmp", self.path(n))
+        items.append({"n": n, "time": utc_now(), "built": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(stat.st_mtime)),
+                      "size": len(data), "digest": digest})
+        for old in items[:-self.KEEP]:
+            with contextlib.suppress(OSError):
+                os.remove(self.path(old["n"]))
+        write_json(self.index, items[-self.KEEP:])
+
+    def watch(self):
+        while True:
+            try:
+                self.snapshot()
+            except Exception as e:  # never let a bad build stop the server
+                print(f"laitex: version snapshot failed: {e}", file=sys.stderr, flush=True)
+            time.sleep(1)
+
+
 def public(c):
     """A comment without the highlight geometry, which agents do not need."""
     return {k: v for k, v in c.items() if k != "rects"}
@@ -301,7 +374,7 @@ def public(c):
 
 # ---- HTTP server ------------------------------------------------------------
 
-def make_handler(st, agent_name):
+def make_handler(st, agent_name, versions):
     mirror = Mirror(st)
 
     class Handler(BaseHTTPRequestHandler):
@@ -372,6 +445,15 @@ def make_handler(st, agent_name):
             if path == "/api/comments":
                 with st.lock():
                     return self.send(200, st.load())
+            if path == "/api/versions":
+                return self.send(200, [{k: v for k, v in i.items() if k != "digest"} for i in versions.list()])
+            m = re.fullmatch(r"/version/(\d+)\.pdf", path)
+            if m:
+                try:
+                    with open(versions.path(m.group(1)), "rb") as f:
+                        return self.send(200, f.read(), "application/pdf")
+                except OSError:
+                    return self.send(404, {"error": "no such version"})
             if path == "/api/chat":
                 q = dict(kv.partition("=")[::2] for kv in query.split("&") if kv)
                 after = int(q.get("after") or 0) if q.get("epoch") == mirror.epoch else 0
@@ -454,11 +536,11 @@ def make_handler(st, agent_name):
     return Handler
 
 
-def bind(st, port, agent_name):
+def bind(st, port, agent_name, versions):
     """Bind to `port`, or the next free one."""
     for p in range(port, port + 50):
         try:
-            return ThreadingHTTPServer(("127.0.0.1", p), make_handler(st, agent_name))
+            return ThreadingHTTPServer(("127.0.0.1", p), make_handler(st, agent_name, versions))
         except OSError:
             continue
     sys.exit(f"laitex: no free port in {port}..{port + 49}")
@@ -484,7 +566,9 @@ def running_server(st):
 def cmd_serve(a):
     st = State(a.pdf)
     st.ensure()
-    httpd = bind(st, a.port, a.agent_name)
+    versions = Versions(st)
+    threading.Thread(target=versions.watch, daemon=True).start()
+    httpd = bind(st, a.port, a.agent_name, versions)
     port = httpd.server_address[1]
     write_json(st.server, {"port": port, "pid": os.getpid(), "pdf": st.pdf})
     print(f"laitex: http://localhost:{port}  ({st.pdf})", flush=True)

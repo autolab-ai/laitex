@@ -118,6 +118,11 @@ The viewer also:
   the target on hover;
 - jumps to a comment when you click it in the sidebar, where you can also edit, resolve,
   reopen or delete it. An edited comment goes to the agent again with the next send;
+- keeps every build of the PDF (the history button): pick any two builds and see what changed,
+  on the newer one with added words in green and removals marked in red, or side by side, with a
+  list of the changes and the comments answered in that build. Builds are kept in your cache
+  folder (`~/Library/Caches/laitex` or `~/.cache/laitex`), the last 40 per PDF, and a rebuild
+  that changes nothing is not kept;
 - has a chat with the agent (the chat button; × hides it). With Claude Code the panel mirrors
   the agent's session, so you see the same conversation as in the terminal, with tool calls
   folded into one line. A message you type there reaches the agent through `laitex wait`, and
