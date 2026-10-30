@@ -134,12 +134,15 @@
   .hk del { color: var(--del-fg); text-decoration: line-through; }
   .hk ins { color: var(--ins-fg); text-decoration: none; }
   .hk.cm { cursor: default; }
-  .hrow { display: flex; justify-content: center; gap: 16px; margin-bottom: 14px; }
+  .hrow { display: flex; gap: 16px; width: max-content; margin: 0 auto 14px; }
+  #histPages { cursor: grab; }
+  #histPages .hpage { cursor: auto; }
+  #histPages.panning, #histPages.panning * { cursor: grabbing !important; user-select: none; }
   .hcell .lbl { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
   .hpage { margin: 0 auto 14px; }
   .hrow .hpage { margin: 0; }
   .chg { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-  .chg i { position: absolute; pointer-events: auto; border-radius: 2px; cursor: pointer; }
+  .chg i { position: absolute; border-radius: 2px; }
   .chg i.ins { background: var(--ins); }
   .chg i.del { background: var(--del); }
   .chg i.dmark { width: 3px; margin-left: -2px; background: var(--del-fg); }
@@ -287,6 +290,8 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>s</kbd></td><td>side by side, or changes on one page</td></tr>
           <tr><td><kbd>o</kbd></td><td>changed pages only</td></tr>
           <tr><td><kbd>b</kbd></td><td>roll back to the selected version</td></tr>
+          <tr><td>select text</td><td>comment on that version</td></tr>
+          <tr><td>drag the gray, or <kbd>Alt</kbd>+drag</td><td>move the pages around</td></tr>
         </table>
       </div>
     </div>
@@ -697,7 +702,7 @@ function commonEnd(a, b) { let n = 0; while (n < a.length && n < b.length && a[a
 function commonStart(a, b) { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; }
 let reanchoring = false;
 async function reanchor(d) {
-  const todo = comments.filter(c => c.status !== "resolved" && c.quote);
+  const todo = comments.filter(c => c.status !== "resolved" && c.quote && !c.vn);  // not those on older versions
   if (reanchoring || !todo.length) return;
   reanchoring = true;
   try {
@@ -741,23 +746,37 @@ async function reanchor(d) {
   finally { reanchoring = false; }
 }
 
+function drawRects(hl, c) {
+  for (const r of c.rects || []) {
+    const d = document.createElement("div");
+    d.style.left = r[0] * 100 + "%"; d.style.top = r[1] * 100 + "%";
+    d.style.width = r[2] * 100 + "%"; d.style.height = r[3] * 100 + "%";
+    if (c.status === "resolved" || c.status === "answered") d.className = c.status;
+    if (c.id === activeId || c.status === "pending") d.className = "active";
+    hl.appendChild(d);
+  }
+}
 function drawHighlights() {
   pagesEl.querySelectorAll(".hl").forEach(h => h.replaceChildren());
   const all = pending ? [...comments, { ...pending, id: "__pending", status: "pending" }] : comments;
   for (const c of all) {
     // Resolved text has usually been rewritten, so its old boxes are only drawn when selected.
     if (c.status === "resolved" && c.id !== activeId) continue;
+    if (c.vn) continue;  // about an older version: drawn on its History pages
     const hl = pagesEl.querySelector(`.page[data-page="${c.page}"] .hl`);
-    if (!hl) continue;
-    for (const r of c.rects || []) {
-      const d = document.createElement("div");
-      d.style.left = r[0] * 100 + "%"; d.style.top = r[1] * 100 + "%";
-      d.style.width = r[2] * 100 + "%"; d.style.height = r[3] * 100 + "%";
-      if (c.status === "resolved" || c.status === "answered") d.className = c.status;
-      if (c.id === activeId || c.status === "pending") d.className = "active";
-      hl.appendChild(d);
-    }
+    if (hl) drawRects(hl, c);
   }
+  if (!histOpen || !cmp) return;
+  const latest = histVersions.length ? histVersions[histVersions.length - 1].n : 0;
+  histPages.querySelectorAll(".hpage").forEach(div => {
+    const hl = div.querySelector(".hl"), vn = div.dataset.side === "A" ? cmp.a : cmp.b;
+    hl.replaceChildren();
+    for (const c of all) {
+      if ((c.vn || latest) !== vn || c.page !== +div.dataset.page) continue;
+      if (c.status === "resolved" && c.id !== activeId) continue;
+      drawRects(hl, c);
+    }
+  });
 }
 
 function esc(s) { return (s || "").replace(/[&<>]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch])); }
@@ -776,7 +795,7 @@ function drawList() {
     el.innerHTML = `<div class="q">${esc(c.quote)}</div>` +
       (ed ? `<textarea class="te" rows="2"></textarea>` : `<div class="t">${esc(c.comment)}</div>`) +
       (c.reply ? `<div class="r">${esc(c.reply)}</div>` : "") +
-      `<div class="meta">p.${c.page} · ${c.status}` +
+      `<div class="meta">p.${c.page}${c.version ? " of " + esc(c.version) : ""} · ${c.status}` +
       (ed ? ` <a data-act="save">save</a> <a data-act="cancel">cancel</a>`
           : ` <a data-act="toggle">${c.status === "resolved" ? "reopen" : "resolve"}</a>` +
             ` <a data-act="edit">edit</a> <a data-act="del">delete</a>`) + `</div>`;
@@ -882,7 +901,7 @@ function contextOf(pageEl, quote, range) {
 }
 document.addEventListener("mousedown", hideTip);
 document.addEventListener("mouseup", ev => {
-  pagesEl.querySelectorAll(".textLayer.selecting").forEach(t => t.classList.remove("selecting"));
+  document.querySelectorAll(".textLayer.selecting").forEach(t => t.classList.remove("selecting"));
   if (pop.contains(ev.target)) return;
   setTimeout(() => {
     const sel = window.getSelection();
@@ -897,6 +916,11 @@ document.addEventListener("mouseup", ev => {
     if (!rects.length) return;
     const quote = sel.toString().replace(/\s+/g, " ").trim();
     pending = { page: +pageEl.dataset.page, quote, context: contextOf(pageEl, quote, range), rects };
+    // On a History page of an older version, the comment is about that version.
+    if (pageEl.classList.contains("hpage") && cmp) {
+      const vn = pageEl.dataset.side === "A" ? cmp.a : cmp.b, latest = histVersions[histVersions.length - 1];
+      if (latest && vn !== latest.n) Object.assign(pending, { vn, version: nameOf(vn) });
+    }
     openPop(range.getBoundingClientRect());
   }, 0);
 });
@@ -914,8 +938,8 @@ document.getElementById("popSave").onclick = savePop;
 async function askPop() {
   const text = popText.value.trim();
   if (!pending || !text) return closePop();
-  const { page, quote, context } = pending;
-  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page, quote, context }) });
+  const { page, quote, context, version } = pending;
+  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page, quote, context, version }) });
   closePop(); window.getSelection().removeAllRanges();
   if (sideTab !== "chat") setTab("chat");
   chatLog.scrollTop = chatLog.scrollHeight; pollChat();
@@ -1352,11 +1376,60 @@ function changedPages(side) {
 function histPage(side, n, width) {
   const s = cmp[side].sizes[n - 1], div = document.createElement("div");
   div.className = "page hpage"; div.dataset.side = side; div.dataset.page = n;
-  div.dataset.w1 = width / zoom; div.dataset.r = s.h / s.w;  // the width at zoom 1, and the shape
+  div.dataset.w1 = width / zoom; div.dataset.r = s.h / s.w; div.dataset.pw = s.w;  // width at zoom 1, shape, width in points
   div.style.width = width + "px"; div.style.height = width * s.h / s.w + "px";
-  div.append(document.createElement("canvas"));
+  div.style.setProperty("--scale-factor", width / s.w);  // the text layer's font sizes follow it
+  const hl = document.createElement("div"); hl.className = "hl";
+  const tl = document.createElement("div"); tl.className = "textLayer";
+  div.append(document.createElement("canvas"), hl, tl);
   return div;
 }
+// The change mark under the pointer. The marks lie under the text layer, which takes the mouse
+// for selecting, so hovering and clicking a change is found by position.
+function changeAt(x, y, scope) {
+  const div = scope && scope.closest(".hpage");
+  if (!div) return null;
+  for (const e of div.querySelectorAll(".chg i")) {
+    const r = e.getBoundingClientRect();
+    if (x >= r.left - 2 && x <= r.right + 2 && y >= r.top && y <= r.bottom) return e;
+  }
+  return null;
+}
+let tipFor = null;
+histPages.addEventListener("mousemove", e => {
+  const el = e.buttons ? null : changeAt(e.clientX, e.clientY, e.target);
+  if (!el) { if (tipFor) { tip.style.display = "none"; tipFor = null; } return; }
+  if (el === tipFor) return;
+  tipFor = el;
+  const h = cmp.hunks[el.dataset.h], r = el.getBoundingClientRect();
+  tip.replaceChildren();
+  if (h.del) { const d = document.createElement("del"); d.textContent = h.old; d.style.color = "var(--del-fg)"; tip.append(d); }
+  if (h.del && h.ins) tip.append(document.createElement("br"));
+  if (h.ins) { const s = document.createElement("ins"); s.textContent = h.new; s.style.color = "var(--ins-fg)"; s.style.textDecoration = "none"; tip.append(s); }
+  tip.style.left = Math.min(r.left, window.innerWidth - 480) + "px";
+  tip.style.top = (r.bottom + 120 > window.innerHeight ? r.top - 110 : r.bottom + 6) + "px";
+  tip.style.display = "block";
+});
+histPages.addEventListener("click", e => {
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return;  // that was a selection, for a comment
+  const el = changeAt(e.clientX, e.clientY, e.target);
+  if (el) histFocus(+el.dataset.h, false);
+});
+// Drag the gray background, or Alt+drag anywhere, to move the pages when they are larger than
+// the view; a plain drag on a page selects text.
+histPages.addEventListener("mousedown", e => {
+  if (e.button !== 0 || (!e.altKey && e.target.closest(".page"))) return;
+  e.preventDefault();
+  const x = e.clientX, y = e.clientY, left = histPages.scrollLeft, top = histPages.scrollTop;
+  histPages.classList.add("panning");
+  const move = ev => { histPages.scrollLeft = left - (ev.clientX - x); histPages.scrollTop = top - (ev.clientY - y); };
+  const up = () => {
+    histPages.classList.remove("panning");
+    window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+  };
+  window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+});
 // Render the pages as they come near the view.
 function histObserve(tok) {
   if (histObs) histObs.disconnect();
@@ -1375,6 +1448,7 @@ function histZoom() {
   for (const p of pages) {
     const w = +p.dataset.w1 * zoom;
     p.style.width = w + "px"; p.style.height = w * +p.dataset.r + "px";
+    p.style.setProperty("--scale-factor", w / +p.dataset.pw);
   }
   if (at) histPages.scrollTop = at.offsetTop + f * at.offsetHeight;
   clearTimeout(histZoomTimer);
@@ -1426,6 +1500,15 @@ async function histRender(div, tok) {
   if (tok !== histToken) return;
   div.replaceChild(canvas, div.querySelector(":scope > canvas"));
   try { div._imgs = await imageBoxes(page); copyImages(div, canvas, sc * dpr); } catch (e) {}
+  if (div.dataset.text !== "1") {  // selectable text, so a version can be commented on
+    div.dataset.text = "1";
+    const tl = div.querySelector(".textLayer");
+    await pdfjsLib.renderTextLayer({ textContentSource: await page.getTextContent(), container: tl,
+                                     viewport: page.getViewport({ scale: 1 }), textDivs: [] }).promise;
+    const end = document.createElement("div"); end.className = "endOfContent"; tl.appendChild(end);
+    tl.addEventListener("mousedown", () => tl.classList.add("selecting"));
+  }
+  drawHighlights();
   if (!cmp.A) return;
   const layer = document.createElement("div"); layer.className = "chg";
   const put = (cls, bx, k) => {
@@ -1440,20 +1523,6 @@ async function histRender(div, tok) {
   });
   if (side === "B" && histMode === "single")  // where words were removed
     cmp.hunks.forEach((h, k) => { if (h.del && h.anchor && h.anchor.n === n) put("dmark", h.anchor, k); });
-  layer.addEventListener("mouseover", e => {
-    const k = e.target.dataset.h;
-    if (k === undefined) return;
-    const h = cmp.hunks[k], r = e.target.getBoundingClientRect();
-    tip.replaceChildren();
-    if (h.del) { const d = document.createElement("del"); d.textContent = h.old; d.style.color = "var(--del-fg)"; tip.append(d); }
-    if (h.del && h.ins) tip.append(document.createElement("br"));
-    if (h.ins) { const s = document.createElement("ins"); s.textContent = h.new; s.style.color = "var(--ins-fg)"; s.style.textDecoration = "none"; tip.append(s); }
-    tip.style.left = Math.min(r.left, window.innerWidth - 480) + "px";
-    tip.style.top = (r.bottom + 120 > window.innerHeight ? r.top - 110 : r.bottom + 6) + "px";
-    tip.style.display = "block";
-  });
-  layer.addEventListener("mouseout", () => { tip.style.display = "none"; });
-  layer.addEventListener("click", e => { if (e.target.dataset.h !== undefined) histFocus(+e.target.dataset.h, false); });
   const old = div.querySelector(".chg");
   if (old) old.remove();
   div.append(layer);

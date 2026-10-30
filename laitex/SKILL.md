@@ -125,6 +125,9 @@ first build is kept when you run `laitex open`.
 
 ## Handling comments
 
+- A comment or chat message with `version` (for example `"v0.2"`) was made on that older version in
+  the History tab: its `quote` and `context` are from that build, which may differ from the current
+  one, for example a sentence the user wants back.
 - Locate each comment in the source with `quote` and `context`. Text extracted from a PDF
   differs from the source: ligatures, hyphenation at line ends, math and LaTeX macros. Search
   for a distinctive few words, not the whole quote.

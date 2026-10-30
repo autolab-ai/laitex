@@ -642,7 +642,7 @@ def make_handler(st, agent_name, versions):
                     return self.send(400, {"error": "empty message"})
                 msg = {"id": uuid.uuid4().hex[:8], "role": "user", "text": text,
                        "time": utc_now(), "page": data.get("page")}
-                for k in ("quote", "context"):  # a question about selected text carries it
+                for k in ("quote", "context", "version"):  # a question about selected text carries it
                     if isinstance(data.get(k), str) and data[k].strip():
                         msg[k] = data[k][:2000]
                 with st.lock():
@@ -675,6 +675,8 @@ def make_handler(st, agent_name, versions):
                 "status": "open",
                 "reply": "",
             }
+            if isinstance(data.get("version"), str) and data.get("vn"):  # about an older version
+                item["version"], item["vn"] = data["version"][:20], int(data["vn"])
             with st.lock():
                 items = st.load()
                 items.append(item)
@@ -845,7 +847,7 @@ def cmd_wait(a):
                         if m["role"] == "user" and not m.get("delivered"):
                             m["delivered"] = now()
                     write_json(st.chat, msgs)
-                    out["chat"] = [{k: m[k] for k in ("text", "page", "quote", "context", "time") if m.get(k) is not None}
+                    out["chat"] = [{k: m[k] for k in ("text", "page", "quote", "context", "version", "time") if m.get(k) is not None}
                                    for m in chat]
                     out["mirror"] = bool(read_json(st.transcript, {}).get("path"))
             json.dump(out, sys.stdout, indent=2, ensure_ascii=False)
