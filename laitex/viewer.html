@@ -5,23 +5,41 @@
 <title>laitex</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
-  :root { --side: 340px; }
+  :root { --side: 340px; color-scheme: light;
+          --bg: #e9e9ec; --fg: #222; --page: #fff; --panel: #fafafa; --card: #fff; --line: #ddd; --line2: #ccc;
+          --muted: #777; --muted2: #555; --faint: #999; --link: #36c; --tip: #fffef4; --tip-line: #ccb;
+          --reply: #eef4ff; --answered: #9bb8e8; --select: rgba(0, 90, 255, .28);
+          --hl: rgba(255, 210, 0, .38); --hl-resolved: rgba(120, 120, 120, .15);
+          --hl-answered: rgba(80, 140, 255, .22); --hl-active: rgba(255, 140, 0, .55); }
+  /* Dark mode only changes how the pages are shown: the page canvas is inverted with its hue
+     turned back, and the raster images are laid over it from an unfiltered copy so photos keep
+     their colors. The PDF and its source are never touched. */
+  :root.dark { color-scheme: dark;
+          --bg: #121212; --fg: #ddd; --page: #1a1a1a; --panel: #1e1e20; --card: #2a2a2d; --line: #3a3a3e; --line2: #4a4a4e;
+          --muted: #999; --muted2: #aaa; --faint: #888; --link: #8ab4f8; --tip: #2a2924; --tip-line: #555;
+          --reply: #24324a; --answered: #4f6f9f; --select: rgba(80, 140, 255, .4);
+          --hl: rgba(255, 200, 0, .4); --hl-resolved: rgba(160, 160, 160, .18);
+          --hl-answered: rgba(90, 150, 255, .35); --hl-active: rgba(255, 140, 0, .6); }
+  :root.dark .page > canvas { filter: invert(.9) hue-rotate(180deg); }
+  .imgs { display: none; position: absolute; inset: 0; pointer-events: none; }
+  :root.dark .imgs { display: block; }
+  .imgs canvas { position: absolute; }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: #e9e9ec; color: #222; }
+  body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--fg); }
   #main { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); overflow-y: auto; }
   #pages { padding: 16px 20px 60vh; min-width: fit-content; }
-  .page { position: relative; margin: 0 auto 14px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  .page { position: relative; margin: 0 auto 14px; background: var(--page); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   .page canvas { display: block; width: 100%; height: 100%; }
   .hl { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
-  .hl div { position: absolute; background: rgba(255, 210, 0, .38); border-radius: 2px; }
-  .hl div.resolved { background: rgba(120, 120, 120, .15); }
-  .hl div.answered { background: rgba(80, 140, 255, .22); }
-  .hl div.active { background: rgba(255, 140, 0, .55); }
+  .hl div { position: absolute; background: var(--hl); border-radius: 2px; }
+  .hl div.resolved { background: var(--hl-resolved); }
+  .hl div.answered { background: var(--hl-answered); }
+  .hl div.active { background: var(--hl-active); }
   .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; z-index: 2;
                text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; }
   .textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre;
                cursor: text; transform-origin: 0% 0%; }
-  .textLayer ::selection { background: rgba(0, 90, 255, .28); }
+  .textLayer ::selection { background: var(--select); }
   /* While selecting, this block covers the gaps between text spans, so dragging over empty
      space (around formulas, at line ends) does not extend the selection to the end of the page.
      Same trick as the PDF.js viewer. */
@@ -31,40 +49,50 @@
   .links { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
   .links a { position: absolute; pointer-events: auto; cursor: pointer; border-radius: 2px; }
   .links a:hover { background: rgba(0, 90, 255, .12); }
-  #tip { position: fixed; display: none; z-index: 20; max-width: 460px; background: #fffef4; border: 1px solid #ccb;
+  #tip { position: fixed; display: none; z-index: 20; max-width: 460px; background: var(--tip); border: 1px solid var(--tip-line);
          border-radius: 6px; box-shadow: 0 3px 12px rgba(0,0,0,.2); padding: 8px 10px; font-size: 12px; line-height: 1.45; }
   #back { position: fixed; left: 12px; bottom: 12px; z-index: 15; display: none; }
   #side { position: fixed; right: 0; top: 0; bottom: 0; width: var(--side); display: flex;
-          flex-direction: column; background: #fafafa; border-left: 1px solid #ccc; padding: 10px; }
+          flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); padding: 10px; }
   #list { flex: 1; overflow-y: auto; min-height: 0; }
-  #keys { flex: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; }
-  #keys kbd { font: 11px ui-monospace, monospace; background: #fff; border: 1px solid #ccc;
+  #keys { flex: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  #keys kbd { font: 11px ui-monospace, monospace; background: var(--card); border: 1px solid var(--line2);
               border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; white-space: nowrap; }
   #side h2 { font-size: 14px; margin: 4px 0 8px; display: flex; justify-content: space-between; align-items: center; }
-  #status { font-size: 11px; color: #777; font-weight: normal; }
-  #docname { font-size: 12px; color: #555; margin: -4px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #agent { font-size: 11px; color: #777; margin: -2px 0 8px; }
+  #status { font-size: 11px; color: var(--muted); font-weight: normal; }
+  #docname { font-size: 12px; color: var(--muted2); margin: -4px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #agent { font-size: 11px; color: var(--muted); margin: -2px 0 8px; }
   #agent i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #bbb; margin-right: 5px; }
   #agent.on i { background: #2a9d4b; }
-  .c { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px; margin-bottom: 8px; cursor: pointer; }
+  .c { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin-bottom: 8px; cursor: pointer; }
   .c.resolved { opacity: .55; }
-  .c.answered { border-color: #9bb8e8; }
-  .c .q { color: #666; font-style: italic; border-left: 3px solid #f2c500; padding-left: 6px; margin-bottom: 4px;
+  .c.answered { border-color: var(--answered); }
+  .c .q { color: var(--muted); font-style: italic; border-left: 3px solid #f2c500; padding-left: 6px; margin-bottom: 4px;
           max-height: 3.9em; overflow: hidden; }
   .c .t { white-space: pre-wrap; }
   .c textarea.te { display: block; width: 100%; font: inherit; resize: vertical; padding: 4px;
-                   border: 1px solid #9bb8e8; border-radius: 4px; overflow: hidden; }
-  .c .r { white-space: pre-wrap; margin-top: 6px; padding: 6px; background: #eef4ff; border-radius: 4px; }
-  .c .meta { font-size: 11px; color: #999; margin-top: 4px; display: flex; gap: 8px; }
-  .c .meta a { color: #36c; cursor: pointer; }
-  #pop { position: fixed; display: none; z-index: 10; width: 320px; background: #fff; border: 1px solid #bbb;
+                   border: 1px solid var(--answered); border-radius: 4px; overflow: hidden; }
+  .c .r { white-space: pre-wrap; margin-top: 6px; padding: 6px; background: var(--reply); border-radius: 4px; }
+  .c .meta { font-size: 11px; color: var(--faint); margin-top: 4px; display: flex; gap: 8px; }
+  .c .meta a { color: var(--link); cursor: pointer; }
+  #pop { position: fixed; display: none; z-index: 10; width: 320px; background: var(--card); border: 1px solid var(--line2);
          border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.2); padding: 8px; }
   #pop textarea { width: 100%; height: 90px; font: inherit; }
   #pop .btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   #pop #popCopy { margin-right: auto; }
   button { font: inherit; padding: 3px 10px; }
-  label { font-size: 11px; color: #555; font-weight: normal; }
+  label { font-size: 11px; color: var(--muted2); font-weight: normal; }
 </style>
+<script>
+// Dark mode is a display setting kept in this browser. Without a choice it follows the system.
+// Set here, before the page is drawn, so it does not flash light first.
+let theme = null;
+try { theme = localStorage.getItem("theme"); } catch (e) {}
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+function applyTheme() { document.documentElement.classList.toggle("dark", theme ? theme === "dark" : darkQuery.matches); }
+applyTheme();
+darkQuery.addEventListener("change", applyTheme);
+</script>
 </head>
 <body>
 <div id="main"><div id="pages"></div></div>
@@ -76,13 +104,14 @@
     <span id="zoomLabel" style="min-width:42px;text-align:center">100%</span>
     <button id="zoomIn" title="Cmd +">+</button>
     <button id="zoomFit" title="Cmd 0">fit</button>
+    <button id="themeBtn" title="Dark mode (display only, the PDF is unchanged)" style="margin-left:auto">&#9680;</button>
   </div>
   <button id="sendBtn" style="width:100%;margin-bottom:6px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Send comments</button>
-  <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:#fff;color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
+  <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:var(--card);color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
   <div id="agent"><i></i><span>The agent is not listening</span></div>
   <label><input type="checkbox" id="showResolved"> show resolved</label>
   <div id="list" style="margin-top:8px"></div>
-  <details id="keys" open style="font-size:12px;color:#555">
+  <details id="keys" open style="font-size:12px;color:var(--muted2)">
     <summary style="cursor:pointer;font-weight:600">How to use</summary>
     <table style="margin-top:6px;border-collapse:collapse">
       <tr><td style="padding:2px 8px 2px 0">select text</td><td>open the comment box</td></tr>
@@ -258,6 +287,105 @@ function makePage(n) {
   return div;
 }
 
+// ---- raster images, kept in their own colors in dark mode ----
+// Follow the page's drawing operators, tracking the transform and a box around the clip, and
+// record where each raster image lands, in page units at scale 1. Image masks are left out:
+// they are drawn in the fill color, like text.
+const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3],
+                       a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+function boxOf(m, pts) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < pts.length; i += 2) {
+    const x = m[0] * pts[i] + m[2] * pts[i + 1] + m[4], y = m[1] * pts[i] + m[3] * pts[i + 1] + m[5];
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  return [x0, y0, x1, y1];
+}
+const cut = (a, b) => [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+function pathPoints(ops, args) {
+  const O = pdfjsLib.OPS, n = { [O.moveTo]: 2, [O.lineTo]: 2, [O.curveTo]: 6, [O.curveTo2]: 4, [O.curveTo3]: 4 };
+  const pts = [];
+  for (let i = 0, j = 0; i < ops.length; i++) {
+    if (ops[i] === O.rectangle) {
+      const [x, y, w, h] = args.slice(j, j += 4);
+      pts.push(x, y, x + w, y, x, y + h, x + w, y + h);
+    } else pts.push(...args.slice(j, j += n[ops[i]] || 0));
+  }
+  return pts;
+}
+async function imageBoxes(page) {
+  const O = pdfjsLib.OPS, vp = page.getViewport({ scale: 1 });
+  const ol = await page.getOperatorList({ intent: "print" });
+  let m = vp.transform, clip = [0, 0, vp.width, vp.height], path = null;
+  const stack = [], boxes = [];
+  const unit = t => {  // an image fills the unit square of its transform
+    const b = cut(clip, boxOf(t, [0, 0, 1, 0, 0, 1, 1, 1]));
+    if (b[2] > b[0] && b[3] > b[1]) boxes.push(b);
+  };
+  for (let i = 0; i < ol.fnArray.length; i++) {
+    const a = ol.argsArray[i];
+    switch (ol.fnArray[i]) {
+      case O.save: stack.push([m, clip]); break;
+      case O.restore: if (stack.length) [m, clip] = stack.pop(); break;
+      case O.transform: m = mul(m, a); break;
+      case O.paintFormXObjectBegin: {
+        stack.push([m, clip]);
+        if (a[0]) m = mul(m, a[0]);
+        const bb = a[1];
+        if (bb) clip = cut(clip, boxOf(m, [bb[0], bb[1], bb[2], bb[1], bb[0], bb[3], bb[2], bb[3]]));
+        break;
+      }
+      case O.paintFormXObjectEnd: if (stack.length) [m, clip] = stack.pop(); break;
+      case O.constructPath: path = boxOf(m, pathPoints(a[0], a[1])); break;
+      case O.clip: case O.eoClip: if (path) clip = cut(clip, path); break;
+      case O.paintImageXObject: case O.paintInlineImageXObject: unit(m); break;
+      case O.paintImageXObjectRepeat:
+        for (let j = 0; j < a[3].length; j += 2) unit(mul(m, [a[1], 0, 0, a[2], a[3][j], a[3][j + 1]]));
+        break;
+      case O.paintInlineImageXObjectGroup: for (const e of a[1]) unit(mul(m, e.transform)); break;
+    }
+  }
+  return boxes;
+}
+// A plot saved as a raster (a matplotlib scatter, a heatmap, a PNG figure) is mostly white with
+// few colors and reads better inverted with the page. A photo has many colors, even on a white
+// background. A thin strip is a colorbar, inverted with its plot. Judged on a fixed-size copy,
+// once per image, so zooming does not change it.
+function isPlot(canvas, x, y, w, h) {
+  if (Math.max(w, h) > 6 * Math.min(w, h)) return true;
+  const t = document.createElement("canvas"); t.width = t.height = 96;
+  const ctx = t.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(canvas, x, y, w, h, 0, 0, 96, 96);
+  const px = ctx.getImageData(0, 0, 96, 96).data, colors = new Set();
+  let white = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    if (Math.min(px[i], px[i + 1], px[i + 2]) >= 240) white++;
+    else colors.add(px[i] >> 4 << 8 | px[i + 1] >> 4 << 4 | px[i + 2] >> 4);
+  }
+  return white > 0.3 * 96 * 96 && colors.size < 220;
+}
+// Copy the photos of a freshly rendered canvas into a layer over it. The layer is only shown in
+// dark mode, where the canvas under it is inverted.
+function copyImages(div, canvas, k) {
+  const layer = document.createElement("div"); layer.className = "imgs";
+  const W = canvas.width, H = canvas.height;
+  for (const box of div._imgs) {
+    const [x0, y0, x1, y1] = box;
+    const x = Math.max(0, Math.round(x0 * k)), y = Math.max(0, Math.round(y0 * k));
+    const w = Math.min(W, Math.round(x1 * k)) - x, h = Math.min(H, Math.round(y1 * k)) - y;
+    if (w < 2 || h < 2) continue;
+    if (box.plot === undefined) box.plot = isPlot(canvas, x, y, w, h);
+    if (box.plot) continue;
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    c.getContext("2d").drawImage(canvas, x, y, w, h, 0, 0, w, h);
+    c.style.left = x / W * 100 + "%"; c.style.top = y / H * 100 + "%";
+    c.style.width = w / W * 100 + "%"; c.style.height = h / H * 100 + "%";
+    layer.appendChild(c);
+  }
+  const old = div.querySelector(".imgs");
+  if (old) old.replaceWith(layer); else canvas.after(layer);
+}
+
 async function renderPage(div, d, g) {
   const n = +div.dataset.page, sc = scaleFor(n);
   if (Math.abs(+div.dataset.scale - sc) < 1e-3) return;
@@ -268,8 +396,10 @@ async function renderPage(div, d, g) {
   // print intent avoids requestAnimationFrame stalls in background windows
   await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp,
                       transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null, intent: "print" }).promise;
+  if (!div._imgs) div._imgs = await imageBoxes(page).catch(e => { console.error(e); return []; });
   if (g !== gen) return;
-  div.replaceChild(canvas, div.querySelector("canvas"));
+  div.replaceChild(canvas, div.querySelector(":scope > canvas"));
+  copyImages(div, canvas, sc * dpr);
   if (div.dataset.text !== "1") {
     const tl = div.querySelector(".textLayer");
     await pdfjsLib.renderTextLayer({ textContentSource: await page.getTextContent(), container: tl,
@@ -470,7 +600,7 @@ function drawList() {
   const items = comments.filter(c => show || c.status !== "resolved")
     .sort((a, b) => (a.status === "resolved") - (b.status === "resolved") || a.page - b.page);
   updateSendBtn();
-  list.innerHTML = items.length ? "" : "<div style='color:#888'>Select text in the PDF to add a comment.</div>";
+  list.innerHTML = items.length ? "" : "<div style='color:var(--faint)'>Select text in the PDF to add a comment.</div>";
   for (const c of items) {
     const el = document.createElement("div");
     el.className = "c " + c.status;
@@ -677,6 +807,11 @@ window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer
 document.getElementById("zoomIn").onclick = () => setZoom(zoom * 1.2);
 document.getElementById("zoomOut").onclick = () => setZoom(zoom / 1.2);
 document.getElementById("zoomFit").onclick = () => setZoom(1);
+document.getElementById("themeBtn").onclick = () => {
+  theme = document.documentElement.classList.contains("dark") ? "light" : "dark";
+  try { localStorage.setItem("theme", theme); } catch (e) {}
+  applyTheme();
+};
 document.getElementById("zoomLabel").textContent = Math.round(zoom * 100) + "%";
 // Cmd/Ctrl +/-/0 and trackpad pinch re-render the PDF sharply instead of scaling pixels.
 window.addEventListener("keydown", e => {

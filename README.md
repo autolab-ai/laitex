@@ -117,7 +117,10 @@ The viewer also:
 - makes citations and section, figure and equation references clickable, with a preview of
   the target on hover;
 - jumps to a comment when you click it in the sidebar, where you can also edit, resolve,
-  reopen or delete it. An edited comment goes to the agent again with the next send.
+  reopen or delete it. An edited comment goes to the agent again with the next send;
+- has a dark mode (the ◐ button, or your system setting until you press it). It only changes
+  how the pages are shown: text and plots are inverted, photos keep their colors, and the PDF
+  and its source stay as they are.
 
 ## How the agent connects
 
