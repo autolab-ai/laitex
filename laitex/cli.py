@@ -383,6 +383,21 @@ class Versions:
             write_json(self.index, items)
             return items[-1]["n"]
 
+    def truncate(self, n):
+        """Forget the versions after n, as if they never existed: their PDFs, and their source
+        snapshots in git. Used by rollback. Returns the numbers removed."""
+        with self.st.lock():
+            items = self.list()
+            gone = [i for i in items if i["n"] > n]
+            write_json(self.index, [i for i in items if i["n"] <= n])
+        for i in gone:
+            with contextlib.suppress(OSError):
+                os.remove(self.path(i["n"]))
+            src = i.get("source")
+            if src:
+                git(src["root"], "update-ref", "-d", src["ref"], check=False)
+        return [i["n"] for i in gone]
+
     def attach(self, n, source):
         with self.st.lock():
             items = self.list()
@@ -403,11 +418,54 @@ class Versions:
                     i["stats"] = clean
             write_json(self.index, items)
 
+    def names(self, items=None):
+        """Display names: v0.1, v0.2, ... until a version is committed to git, which becomes
+        v1.0; then v1.1, v1.2, ... until the next commit (v2.0), and so on."""
+        major, minor, out = 0, 0, {}
+        for i in items if items is not None else self.list():
+            if i.get("release"):
+                major, minor = major + 1, 0
+            else:
+                minor += 1
+            out[i["n"]] = f"v{major}.{minor}"
+        return out
+
     def public(self):
         """The list as the viewer sees it."""
-        return [{"n": i["n"], "time": i["time"], "built": i.get("built"), "rev": i["digest"][:8],
-                 "sealed": i.get("sealed", True), "label": i.get("label", ""),
-                 "source": bool(i.get("source")), "stats": i.get("stats")} for i in self.list()]
+        items = self.list()
+        names = self.names(items)
+        return [{"n": i["n"], "name": names[i["n"]], "time": i["time"], "built": i.get("built"),
+                 "rev": i["digest"][:8], "sealed": i.get("sealed", True), "label": i.get("label", ""),
+                 "source": bool(i.get("source")), "release": bool(i.get("release")), "stats": i.get("stats")}
+                for i in items]
+
+    def mark_release(self):
+        """If a commit made during the review holds the source of a version, mark that version as
+        a release (the next major number). Commits from before the review do not count. A version matches when every file of the commit, except the PDF,
+        is as the version had it; files the version had but the commit leaves out (untracked
+        then) do not count. Returns the version marked, if any."""
+        items = self.list()
+        srcs = [i for i in reversed(items) if i.get("source")]
+        if not srcs:
+            return None
+        root, pdf = srcs[0]["source"]["root"], srcs[0]["source"]["pdf"]
+        head = git(root, "rev-parse", "-q", "--verify", "HEAD", check=False)
+        if not head or head == srcs[-1]["source"].get("head"):
+            return None  # no commit since the review started: the versions stay v0.x
+        for i in srcs:
+            r = subprocess.run(["git", "-C", root, "diff", "--quiet", "--diff-filter=d", i["source"]["commit"], "HEAD",
+                                "--", ".", f":(exclude){pdf}"], capture_output=True)
+            if r.returncode == 0:
+                if i.get("release"):
+                    return None  # this commit is already marked
+                with self.st.lock():
+                    fresh = self.list()
+                    for f in fresh:
+                        if f["n"] == i["n"]:
+                            f["release"] = True
+                    write_json(self.index, fresh)
+                return i["n"]
+        return None
 
     def watch(self):
         while True:
@@ -470,7 +528,7 @@ def git_snapshot(versions, n, label):
     for old in git(root, "for-each-ref", "--format=%(refname)", ref.rsplit("/", 1)[0] + "/").split():
         if old.rsplit("/", 1)[1] not in kept:
             git(root, "update-ref", "-d", old, check=False)
-    return {"root": root, "commit": commit, "ref": ref, "pdf": pdf}
+    return {"root": root, "commit": commit, "ref": ref, "pdf": pdf, "head": head}
 
 
 def public(c):
@@ -597,6 +655,7 @@ def make_handler(st, agent_name, versions):
                     req = {"id": uuid.uuid4().hex[:8], "time": now(), "action": action, "open": n}
                     if action == "rollback":
                         req["version"] = int(data.get("version") or 0)
+                        req["name"] = versions.names().get(req["version"], "")
                     write_json(st.request, req)
                 return self.send(200, req)
             if self.path != "/api/comments":
@@ -848,23 +907,39 @@ def cmd_checkpoint(a):
     versions.snapshot(settle=False)  # the build just made, even if the server has not seen it yet
     items = versions.list()
     if not items or items[-1].get("sealed", True):
-        print(f"laitex: no new build since v{items[-1]['n']}; nothing to keep" if items else "laitex: no build yet")
+        released = release(versions)
+        if released:
+            print(f"marked {versions.names()[released]} (version {released}) as the committed version")
+        else:
+            print(f"laitex: no new build since {versions.names()[items[-1]['n']]}; nothing to keep" if items else "laitex: no build yet")
         return
     n = items[-1]["n"]
     try:
         source = git_snapshot(versions, n, a.message)
     except (RuntimeError, OSError) as e:
-        print(f"laitex: could not record the source in git ({e}); v{n} is kept without rollback", file=sys.stderr)
+        print(f"laitex: could not record the source in git ({e}); it is kept without rollback", file=sys.stderr)
         source = None
     versions.seal(a.message, source)
-    print(f"v{n}" + (f", source in {source['ref']}" if source else ", no source snapshot (not a git repository)"))
+    released = release(versions)
+    name = versions.names()[n]
+    print(f"kept {name} (version {n})" + (f", source in {source['ref']}" if source else ", no source snapshot (not a git repository)")
+          + (f"; it is the committed version" if released == n else ""))
+
+
+def release(versions):
+    try:
+        return versions.mark_release()
+    except (RuntimeError, OSError):
+        return None
 
 
 def cmd_rollback(a):
-    """Restore the source files of version n into the working tree. HEAD and the index are left
-    alone, so the result shows up as ordinary uncommitted changes."""
+    """Restore the source files of version n into the working tree, and forget the versions
+    after it. HEAD and the index are left alone, so the result shows up as ordinary uncommitted
+    changes."""
     st = State(a.pdf)
-    v = next((i for i in Versions(st).list() if i["n"] == a.version), None)
+    versions = Versions(st)
+    v = next((i for i in versions.list() if i["n"] == a.version), None)
     if not v:
         sys.exit(f"laitex: no version {a.version}")
     src = v.get("source")
@@ -882,6 +957,10 @@ def cmd_rollback(a):
     print("\n".join(restored) if restored else "no files differed")
     if left:
         print("not in that version, untracked, left in place: " + ", ".join(left))
+    names = versions.names()
+    gone = versions.truncate(a.version)
+    if gone:
+        print("removed from the history: " + ", ".join(names[n] for n in gone))
 
 
 def cmd_install_skill(a):

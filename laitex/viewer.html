@@ -5,7 +5,7 @@
 <title>laitex</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
-  :root { --side: 340px; --chatw: 0px; color-scheme: light;
+  :root { --side: 370px; color-scheme: light;
           --bg: #e9e9ec; --fg: #222; --page: #fff; --panel: #fafafa; --card: #fff; --line: #ddd; --line2: #ccc;
           --muted: #777; --muted2: #555; --faint: #999; --link: #36c; --tip: #fffef4; --tip-line: #ccb;
           --reply: #eef4ff; --answered: #9bb8e8; --select: rgba(0, 90, 255, .28);
@@ -28,7 +28,7 @@
   .imgs canvas { position: absolute; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--fg); }
-  #main { position: fixed; left: 0; top: 0; bottom: 0; right: calc(var(--side) + var(--chatw)); overflow-y: auto; }
+  #main { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); overflow-y: auto; }
   #pages { padding: 16px 20px 60vh; min-width: fit-content; }
   .page { position: relative; margin: 0 auto 14px; background: var(--page); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   .page canvas { display: block; width: 100%; height: 100%; }
@@ -57,12 +57,18 @@
   #side { position: fixed; right: 0; top: 0; bottom: 0; width: var(--side); display: flex;
           flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); padding: 10px; }
   #list { flex: 1; overflow-y: auto; min-height: 0; }
-  #keys { flex: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-  #keys kbd { font: 11px ui-monospace, monospace; background: var(--card); border: 1px solid var(--line2);
-              border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; white-space: nowrap; }
-  #side h2 { font-size: 14px; margin: 4px 0 8px; display: flex; justify-content: space-between; align-items: center; }
-  #status { font-size: 11px; color: var(--muted); font-weight: normal; }
-  #docname { font-size: 12px; color: var(--muted2); margin: -4px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the panel: Review (the comments), Chat and History, each a tab */
+  #tabs { display: flex; gap: 4px; margin: 0 0 6px; border-bottom: 1px solid var(--line); }
+  #tabs button { font-weight: 600; font-size: 13px; border: 0; background: none; color: var(--muted); padding: 4px 8px 5px;
+                 margin-bottom: -1px; border-bottom: 2px solid transparent; border-radius: 0; cursor: pointer; }
+  #tabs button.on { color: var(--fg); border-bottom-color: #d97757; }
+  #tabs button.unread::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 5px;
+                               border-radius: 50%; background: #d97757; vertical-align: middle; }
+  #docline { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
+  #status { font-size: 11px; color: var(--muted); font-weight: normal; white-space: nowrap; }
+  #docname { font-size: 12px; color: var(--muted2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pane { flex: 1; min-height: 0; display: none; flex-direction: column; }
+  #side[data-tab="review"] #reviewTab, #side[data-tab="chat"] #chatTab, #side[data-tab="history"] #histTab { display: flex; }
   #agent { font-size: 11px; color: var(--muted); margin: -2px 0 8px; }
   #agent i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #bbb; margin-right: 5px; }
   #agent.on i { background: #2a9d4b; }
@@ -84,19 +90,19 @@
   #pop #popCopy { margin-right: auto; }
   button { font: inherit; padding: 3px 10px; }
   /* history: the panel's History tab picks the builds; the comparison covers the page area */
-  #hist { position: fixed; left: 0; top: 0; bottom: 0; right: calc(var(--side) + var(--chatw)); z-index: 6;
+  #hist { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); z-index: 6;
           display: none; background: var(--bg); }
   #hist.open { display: block; }
   #histPages { position: absolute; inset: 0; overflow: auto; padding: 16px 20px 40vh; }
   #histPages > .note { color: var(--muted); padding: 20px; }
   #histCtl { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 8px;
-             padding: 4px 12px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+             padding: 2px 0 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
   #histCtl select { font: inherit; min-width: 0; width: 100%; }
   #histCtl .row { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   #histCtl .seg button { padding: 2px 8px; }
   #histCtl .seg button.on { background: var(--answered); color: #fff; border-color: var(--answered); }
   #histSum { color: var(--muted); }
-  #histList { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 20px; font-size: 12px; }
+  #histList { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 2px 20px; font-size: 12px; }
   #histList .note { color: var(--muted); padding: 8px 2px; line-height: 1.45; }
   #histList h4 { margin: 10px 0 4px; font-size: 12px; }
   .ver { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; }
@@ -110,6 +116,7 @@
   .ver .vd { margin-top: 6px; border-top: 1px solid var(--line); }
   .ver .vl { margin-top: 2px; overflow-wrap: anywhere; }
   .ver .vt i { font-style: normal; color: #d97757; }
+  .ver .vt .rel { font-style: normal; font-weight: normal; font-size: 11px; color: var(--ins-fg); }
   .ver .rb { margin-top: 6px; font-size: 11px; padding: 2px 8px; }
   .ver .rbn { margin-top: 6px; font-size: 11px; color: #d97757; }
   .hk { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
@@ -128,20 +135,9 @@
   .chg i.del { background: var(--del); }
   .chg i.dmark { width: 3px; margin-left: -2px; background: var(--del-fg); }
   .chg i.flash { outline: 2px solid #d97757; outline-offset: 1px; }
-  /* the chat with the agent, between the pages and the comments; hidden until opened */
-  :root.dock-open { --chatw: 400px; }
-  #chat { position: fixed; top: 0; bottom: 0; right: var(--side); width: var(--chatw); display: none;
-          flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); }
-  :root.dock-open #chat { display: flex; }
-  #chatHead { display: flex; align-items: center; gap: 8px; padding: 8px 12px 6px; }
-  #chatHead .tabs button { font-weight: 600; border: 0; background: none; color: var(--muted); padding: 3px 6px;
-                           border-bottom: 2px solid transparent; cursor: pointer; }
-  #chatHead .tabs button.on { color: var(--fg); border-bottom-color: #d97757; }
-  #chatTab, #histTab { flex: 1; min-height: 0; display: none; flex-direction: column; }
-  #chat[data-tab="chat"] #chatTab, #chat[data-tab="history"] #histTab { display: flex; }
-  #chat:not([data-tab="chat"]) #chatMode { visibility: hidden; }
-  #chatMode { flex: 1; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #chatLog { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
+  /* the Chat tab */
+  #chatMode { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #chatLog { flex: 1; min-height: 0; overflow-y: auto; padding: 0 2px 12px; }
   .m { margin: 8px 0; line-height: 1.45; overflow-wrap: anywhere; }
   .m.user { margin-left: 36px; padding: 6px 9px; border-radius: 8px; background: var(--reply); white-space: pre-wrap; }
   .m.user .via { display: block; margin-top: 2px; font-size: 10px; color: var(--faint); }
@@ -158,13 +154,26 @@
   .steps { margin: 4px 0; font-size: 11px; color: var(--faint); }
   .steps summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .steps div { padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #chatForm { border-top: 1px solid var(--line); padding: 8px 12px 10px; }
+  #chatForm { border-top: 1px solid var(--line); padding: 8px 0 0; }
   #chatInput { display: block; width: 100%; height: 58px; resize: vertical; font: inherit; padding: 6px;
                color: var(--fg); background: var(--card); border: 1px solid var(--line2); border-radius: 6px; }
   #chatNote { min-height: 15px; margin-top: 4px; font-size: 11px; color: var(--muted); }
-  #chatBtn.unread::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 5px;
-                           border-radius: 50%; background: #d97757; vertical-align: middle; }
   label { font-size: 11px; color: var(--muted2); font-weight: normal; }
+  kbd { font: 11px ui-monospace, monospace; background: var(--card); border: 1px solid var(--line2);
+        border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+  #hint { margin-top: 10px; font-size: 11px; color: var(--muted); }
+  #help { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
+          background: rgba(0, 0, 0, .35); }
+  #help.open { display: flex; }
+  #help .box { max-width: 760px; max-height: 90vh; overflow-y: auto; margin: 16px; padding: 14px 18px 16px;
+               background: var(--panel); color: var(--fg); border: 1px solid var(--line2); border-radius: 10px;
+               box-shadow: 0 8px 30px rgba(0, 0, 0, .3); font-size: 12px; }
+  #help .head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-size: 14px; }
+  #help .head span { font-size: 11px; color: var(--muted); }
+  #help .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+  #help h4 { margin: 12px 0 4px; font-size: 12px; }
+  #help td { padding: 2px 10px 2px 0; vertical-align: top; }
+  #help td:first-child { white-space: nowrap; }
 </style>
 <script>
 // Dark mode is a display setting kept in this browser. Without a choice it follows the system.
@@ -174,27 +183,44 @@ try { theme = localStorage.getItem("theme"); } catch (e) {}
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
 function applyTheme() { document.documentElement.classList.toggle("dark", theme ? theme === "dark" : darkQuery.matches); }
 applyTheme();
-try { if (localStorage.getItem("dock")) document.documentElement.classList.add("dock-open"); } catch (e) {}
 darkQuery.addEventListener("change", applyTheme);
 </script>
 </head>
 <body>
 <div id="main"><div id="pages"></div></div>
 <div id="hist"><div id="histPages"></div></div>
-<div id="chat" data-tab="chat">
-  <div id="chatHead">
-    <span class="tabs"><button id="tabChat">Chat</button><button id="tabHist">History</button></span>
-    <span id="chatMode"></span>
-    <button id="chatClose" title="Hide the panel">&times;</button>
+<div id="side" data-tab="review">
+  <div id="tabs">
+    <button id="tabReview" class="on" title="Your comments on the PDF">Review</button>
+    <button id="tabChat" title="Talk to the agent">Chat</button>
+    <button id="tabHist" title="Every version of the PDF, and what changed in each">History</button>
   </div>
-  <div id="chatTab">
+  <div id="docline"><span id="docname"></span><span id="status">loading</span></div>
+  <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+    <button id="zoomOut" title="Cmd -">&minus;</button>
+    <span id="zoomLabel" style="min-width:42px;text-align:center">100%</span>
+    <button id="zoomIn" title="Cmd +">+</button>
+    <button id="zoomFit" title="Cmd 0">fit</button>
+    <button id="helpBtn" title="Keyboard shortcuts (h)" style="margin-left:auto">?</button>
+    <button id="themeBtn" title="Dark mode, display only (d)">&#9680;</button>
+  </div>
+  <div id="agent"><i></i><span>The agent is not listening</span></div>
+  <div id="reviewTab" class="pane">
+  <button id="sendBtn" style="width:100%;margin-bottom:6px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Send comments</button>
+  <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:var(--card);color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
+  <label><input type="checkbox" id="showResolved"> show resolved</label>
+  <div id="list" style="margin-top:8px"></div>
+  <div id="hint">Press <kbd>h</kbd> for keyboard shortcuts.</div>
+  </div>
+  <div id="chatTab" class="pane">
+    <div id="chatMode"></div>
     <div id="chatLog"></div>
     <div id="chatForm">
       <textarea id="chatInput" placeholder="Message the agent. Enter: send, Shift+Enter: new line"></textarea>
       <div id="chatNote"></div>
     </div>
   </div>
-  <div id="histTab">
+  <div id="histTab" class="pane">
     <div id="histCtl">
       <span>show</span><select id="histB" title="The build to show"></select>
       <span>against</span><select id="histA" title="The build to compare it with"></select>
@@ -207,41 +233,54 @@ darkQuery.addEventListener("change", applyTheme);
     <div id="histList"></div>
   </div>
 </div>
-<div id="side">
-  <h2>Comments <span id="status">loading</span></h2>
-  <div id="docname"></div>
-  <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
-    <button id="zoomOut" title="Cmd -">&minus;</button>
-    <span id="zoomLabel" style="min-width:42px;text-align:center">100%</span>
-    <button id="zoomIn" title="Cmd +">+</button>
-    <button id="zoomFit" title="Cmd 0">fit</button>
-    <button id="histBtn" title="Every build of the PDF, and what changed" style="margin-left:auto">history</button>
-    <button id="chatBtn" title="Show or hide the chat with the agent">chat</button>
-    <button id="themeBtn" title="Dark mode (display only, the PDF is unchanged)">&#9680;</button>
-  </div>
-  <button id="sendBtn" style="width:100%;margin-bottom:6px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Send comments</button>
-  <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:var(--card);color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
-  <div id="agent"><i></i><span>The agent is not listening</span></div>
-  <label><input type="checkbox" id="showResolved"> show resolved</label>
-  <div id="list" style="margin-top:8px"></div>
-  <details id="keys" open style="font-size:12px;color:var(--muted2)">
-    <summary style="cursor:pointer;font-weight:600">How to use</summary>
-    <table style="margin-top:6px;border-collapse:collapse">
-      <tr><td style="padding:2px 8px 2px 0">select text</td><td>open the comment box</td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Enter</kbd></td><td>save the comment</td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Shift+Enter</kbd></td><td>new line in a comment</td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+C</kbd></td><td>copy the selected text</td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Esc</kbd></td><td>cancel / clear selection</td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Enter</kbd></td><td>send open comments to <span class="an">the agent</span></td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd + / &minus; / 0</kbd></td><td>zoom in / out / fit (or pinch)</td></tr>
-      <tr><td style="padding:2px 8px 2px 0"><kbd>Alt+&larr;</kbd></td><td>back after following a link</td></tr>
-      <tr><td style="padding:2px 8px 2px 0">history</td><td>every build, and what changed in each</td></tr>
-      <tr><td style="padding:2px 8px 2px 0">chat</td><td>talk to <span class="an">the agent</span> (&times; hides the panel)</td></tr>
-    </table>
-  </details>
-</div>
 <div id="tip"></div>
+<div id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <div class="box">
+    <div class="head"><b>Keyboard shortcuts</b><span>h or Esc closes this</span></div>
+    <div class="cols">
+      <div>
+        <h4>Anywhere</h4>
+        <table>
+          <tr><td><kbd>r</kbd> <kbd>c</kbd> <kbd>H</kbd></td><td>Review, Chat, History tab</td></tr>
+          <tr><td><kbd>h</kbd> <kbd>?</kbd></td><td>this list</td></tr>
+          <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>scroll the pages down, up</td></tr>
+          <tr><td><kbd>Space</kbd> <kbd>Shift+Space</kbd></td><td>a screen down, up</td></tr>
+          <tr><td><kbd>g</kbd> <kbd>G</kbd></td><td>first page, last page</td></tr>
+          <tr><td><kbd>Cmd +</kbd> <kbd>Cmd &minus;</kbd> <kbd>Cmd 0</kbd></td><td>zoom in, out, fit (or pinch)</td></tr>
+          <tr><td><kbd>d</kbd></td><td>dark mode</td></tr>
+          <tr><td><kbd>Alt+&larr;</kbd></td><td>back after following a link</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>cancel, close, back to Review</td></tr>
+        </table>
+        <h4>Chat</h4>
+        <table>
+          <tr><td><kbd>c</kbd></td><td>go to the message box</td></tr>
+          <tr><td><kbd>Enter</kbd> <kbd>Shift+Enter</kbd></td><td>send, new line</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>leave the message box</td></tr>
+        </table>
+      </div>
+      <div>
+        <h4>Review</h4>
+        <table>
+          <tr><td>select text</td><td>comment on it</td></tr>
+          <tr><td><kbd>Enter</kbd> <kbd>Shift+Enter</kbd></td><td>save the comment, new line</td></tr>
+          <tr><td><kbd>Cmd+C</kbd></td><td>copy the selected text</td></tr>
+          <tr><td><kbd>n</kbd> <kbd>p</kbd></td><td>next, previous comment</td></tr>
+          <tr><td><kbd>e</kbd></td><td>edit the selected comment</td></tr>
+          <tr><td><kbd>Cmd+Enter</kbd></td><td>send open comments to <span class="an">the agent</span></td></tr>
+          <tr><td><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
+        </table>
+        <h4>History</h4>
+        <table>
+          <tr><td><kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>newer, older version</td></tr>
+          <tr><td><kbd>&rarr;</kbd> <kbd>&larr;</kbd> or <kbd>n</kbd> <kbd>p</kbd></td><td>next, previous change</td></tr>
+          <tr><td><kbd>s</kbd></td><td>side by side, or changes on one page</td></tr>
+          <tr><td><kbd>o</kbd></td><td>changed pages only</td></tr>
+          <tr><td><kbd>b</kbd></td><td>roll back to the selected version</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 <button id="back" title="Back (Alt+Left)">&larr; back</button>
 <div id="pop">
   <textarea id="popText" placeholder="Enter: save · Shift+Enter: new line · Cmd+Enter: save and send · Esc: cancel"></textarea>
@@ -1142,8 +1181,9 @@ function histDoc(n) {
   return histDocs.get(key);
 }
 const revOf = n => (histVersions.find(x => x.n === n) || {}).rev;
+const nameOf = n => (histVersions.find(x => x.n === n) || {}).name || `v${n}`;
 const vTime = v => new Date(v.time);
-const vLabel = (v, latest) => `v${v.n} · ${vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}${latest ? " (current)" : ""}${v.sealed ? "" : ", in progress"}`;
+const vLabel = (v, latest) => `${v.name || "v" + v.n} · ${vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}${latest ? " (current)" : ""}${v.sealed ? "" : ", in progress"}`;
 async function histLoad(keep) {
   histVersions = await (await fetch("/api/versions")).json();
   const vs = histVersions.slice().reverse(), b0 = +histB.value, a0 = histA.value;
@@ -1296,7 +1336,7 @@ function histLayout() {
       for (const side of ["A", "B"]) {
         const cell = document.createElement("div"); cell.className = "hcell";
         const lbl = document.createElement("div"); lbl.className = "lbl";
-        lbl.textContent = `v${side === "A" ? cmp.a : cmp.b}, page ${p}`;
+        lbl.textContent = `${nameOf(side === "A" ? cmp.a : cmp.b)}, page ${p}`;
         cell.append(lbl);
         if (p <= cmp[side].sizes.length) cell.append(histPage(side, p, w));
         row.append(cell);
@@ -1371,8 +1411,9 @@ function histRenderList() {
   for (const v of histVersions.slice().reverse()) {
     const row = document.createElement("div"); row.className = "ver" + (v.n === sel ? " on" : "");
     const t = document.createElement("div"); t.className = "vt";
-    const name = document.createElement("b"); name.textContent = `v${v.n}` + (v.n === latest ? " (current)" : "");
+    const name = document.createElement("b"); name.textContent = nameOf(v.n) + (v.n === latest ? " (current)" : "");
     if (!v.sealed) { const ip = document.createElement("i"); ip.textContent = " in progress"; name.append(ip); }
+    if (v.release) { const r = document.createElement("span"); r.className = "rel"; r.textContent = " committed"; name.append(r); }
     const when = document.createElement("span");
     when.textContent = vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     t.append(name, when);
@@ -1390,13 +1431,14 @@ function histRenderList() {
     const rolling = request_ && request_.action === "rollback" && request_.version === v.n;
     if (rolling) {
       const n = document.createElement("div"); n.className = "rbn";
-      n.textContent = `rolling back to v${v.n}, ${agentName} is working…`; row.append(n);
+      n.textContent = `rolling back to ${nameOf(v.n)}, ${agentName} is working…`; row.append(n);
     } else if (v.sealed && v.source && v.n !== latest) {
       const btn = document.createElement("button"); btn.className = "rb"; btn.textContent = "roll back to this version";
-      btn.title = `Ask ${agentName} to restore the source of v${v.n} and rebuild`;
+      btn.title = `Ask ${agentName} to restore the source of ${nameOf(v.n)} and rebuild`;
       btn.onclick = async e => {
         e.stopPropagation();
-        if (!confirm(`Ask ${agentName} to restore the source of v${v.n} and rebuild? Later versions stay in the history.`)) return;
+        const later = histVersions.filter(x => x.n > v.n).map(x => x.name).join(", ");
+        if (!confirm(`Ask ${agentName} to restore the source of ${nameOf(v.n)} and rebuild? ${later} will be removed from the history.`)) return;
         request_ = await (await fetch("/api/request", { method: "POST", headers: H,
                                                        body: JSON.stringify({ action: "rollback", version: v.n }) })).json();
         histRenderList();
@@ -1412,7 +1454,7 @@ function histRenderList() {
 function histDetails() {
   const box = document.createElement("div"); box.className = "vd";
   const add = (tag, text, cls) => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; box.append(e); return e; };
-  if (cmp.a && cmp.a !== prevOf(cmp.b)) add("div", `compared with v${cmp.a}`, "note");
+  if (cmp.a && cmp.a !== prevOf(cmp.b)) add("div", `compared with ${nameOf(cmp.a)}`, "note");
   const vs = histVersions, iB = vs.findIndex(v => v.n === cmp.b), iA = vs.findIndex(v => v.n === cmp.a);
   const from = vTime(vs[iA >= 0 ? iA + 1 : iB]), to = vs[iB + 1] ? vTime(vs[iB + 1]) : new Date(8.64e15);
   const answered = comments.filter(c => c.replied && c.reply && (t => t >= from && t < to)(new Date(c.replied.replace(" ", "T"))));
@@ -1464,14 +1506,15 @@ async function setHist(open) {
   histShow();
   fillStats();
   // A new build while the history is open: list it, and follow it if the newest build is on show.
-  const sig = () => JSON.stringify(histVersions.map(v => [v.n, v.rev, v.sealed, v.label]));
+  const sig = () => JSON.stringify(histVersions.map(v => [v.n, v.rev, v.sealed, v.label, v.name]));
   histPoll = setInterval(async () => {
     const last = histVersions[histVersions.length - 1], before = last ? last.n : 0, beforeRev = last ? last.rev : "";
-    const wasLatest = +histB.value === before, was = sig();
+    const shown = +histB.value, wasLatest = shown === before, was = sig();
     await histLoad(true);
     if (sig() === was) return;
     const now_ = histVersions[histVersions.length - 1];
-    if (wasLatest && now_ && (now_.n !== before || now_.rev !== beforeRev)) {
+    const gone = !histVersions.some(v => v.n === shown);  // removed by a rollback
+    if (now_ && (gone || (wasLatest && (now_.n !== before || now_.rev !== beforeRev)))) {
       histB.value = now_.n; histA.value = prevOf(now_.n); histShow();
     } else histRenderList();
     fillStats();
@@ -1482,16 +1525,16 @@ document.getElementById("histSingle").onclick = () => { histMode = "single"; try
 document.getElementById("histSide").onclick = () => { histMode = "side"; try { localStorage.setItem("histView", histMode); } catch (e) {} histShow(); };
 document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
 histPages.addEventListener("scroll", () => { tip.style.display = "none"; });
-window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setDock(null); });
+window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setTab("review"); });
 
 // ---- chat with the agent ----
 // When laitex can read the agent's session transcript, the panel mirrors that session, so it
 // shows the same conversation as the terminal. Messages typed here reach the agent through
 // `laitex wait`, like comments.
 const chatLog = document.getElementById("chatLog"), chatInput = document.getElementById("chatInput");
-const chatBtn = document.getElementById("chatBtn"), chatNote = document.getElementById("chatNote");
+const chatBtn = document.getElementById("tabChat"), chatNote = document.getElementById("chatNote");
 let chatEpoch = "", chatSeq = 0, chatTimer = null;
-let chatOpen = false, dockTab = null;  // the panel's tab: "chat", "history", or null when it is hidden
+let chatOpen = false, sideTab = "review";  // the panel's tab: "review", "chat" or "history"
 const escHtml = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function mdInline(t) {
   return t.split(/(`[^`]*`)/).map((part, k) => k % 2 ? "<code>" + escHtml(part.slice(1, -1)) + "</code>"
@@ -1584,19 +1627,14 @@ async function pollChat() {
   } catch (e) {}
   chatTimer = setTimeout(pollChat, chatOpen ? 1500 : 5000);
 }
-const dock = document.getElementById("chat");
-function setDock(tab) {
-  const was = dockTab;
-  dockTab = tab;
-  try { localStorage.setItem("dock", tab || ""); } catch (e) {}
-  document.documentElement.classList.toggle("dock-open", !!tab);
-  dock.dataset.tab = tab || "";
+function setTab(tab) {
+  sideTab = tab;
+  document.getElementById("side").dataset.tab = tab;
+  document.getElementById("tabReview").classList.toggle("on", tab === "review");
   document.getElementById("tabChat").classList.toggle("on", tab === "chat");
   document.getElementById("tabHist").classList.toggle("on", tab === "history");
   chatOpen = tab === "chat";
-  if (chatOpen) chatBtn.classList.remove("unread");
-  if (!was !== !tab) { gen++; layout(); renderVisible(); }  // the pages get narrower or wider
-  if (chatOpen) { chatLog.scrollTop = chatLog.scrollHeight; chatInput.focus(); }
+  if (chatOpen) { chatBtn.classList.remove("unread"); chatLog.scrollTop = chatLog.scrollHeight; chatInput.focus(); }
   pollChat();
   setHist(tab === "history");
 }
@@ -1613,12 +1651,76 @@ chatInput.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
   else if (e.key === "Escape") chatInput.blur();
 });
-chatBtn.onclick = () => setDock(dockTab === "chat" ? null : "chat");
-document.getElementById("histBtn").onclick = () => setDock(dockTab === "history" ? null : "history");
-document.getElementById("tabChat").onclick = () => setDock("chat");
-document.getElementById("tabHist").onclick = () => setDock("history");
-document.getElementById("chatClose").onclick = () => setDock(null);
-try { setDock(localStorage.getItem("dock") || null); } catch (e) { setDock(null); }
+// ---- keyboard ----
+// Single keys work whenever no text box has the focus; h lists them.
+const help = document.getElementById("help");
+const setHelp = open => help.classList.toggle("open", open);
+document.getElementById("helpBtn").onclick = () => setHelp(true);
+help.addEventListener("click", e => { if (e.target === help) setHelp(false); });
+window.addEventListener("keydown", e => {  // capture: closing the help should not also leave a tab
+  if (help.classList.contains("open") && (e.key === "Escape" || e.key === "h" || e.key === "?")) {
+    setHelp(false); e.preventDefault(); e.stopImmediatePropagation();
+  }
+}, true);
+const scroller = () => histOpen ? histPages : main;
+function stepComment(dir) {
+  const show = document.getElementById("showResolved").checked;
+  const items = comments.filter(c => show || c.status !== "resolved")
+    .sort((a, b) => (a.status === "resolved") - (b.status === "resolved") || a.page - b.page);
+  if (!items.length) return;
+  const i = items.findIndex(c => c.id === activeId);
+  const k = i < 0 ? (dir > 0 ? 0 : items.length - 1) : Math.max(0, Math.min(items.length - 1, i + dir));
+  const card = document.getElementById("list").children[k];
+  if (card) { card.click(); card.scrollIntoView({ block: "nearest" }); }
+}
+function stepVersion(dir) {  // dir 1: newer, -1: older
+  const i = histVersions.findIndex(v => v.n === +histB.value), v = histVersions[i + dir];
+  if (!v) return;
+  histB.value = v.n; histA.value = prevOf(v.n); histCur = -1;
+  histShow().then(() => { const row = histList.querySelector(".ver.on"); if (row) row.scrollIntoView({ block: "nearest" }); });
+}
+let histCur = -1;  // the change last jumped to with the keyboard
+function stepChange(dir) {
+  if (!cmp || !cmp.hunks.length) return;
+  histCur = Math.max(0, Math.min(cmp.hunks.length - 1, histCur + dir));
+  histFocus(histCur, true);
+  const item = histList.querySelector(`.hk[data-h="${histCur}"]`);
+  if (item) item.scrollIntoView({ block: "nearest" });
+}
+window.addEventListener("keydown", e => {
+  const t = e.target;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || pop.style.display === "block") return;
+  const sc = scroller(), key = e.key;
+  const keys = {
+    h: () => setHelp(true), "?": () => setHelp(true),
+    r: () => setTab("review"), c: () => setTab("chat"), H: () => setTab("history"),
+    d: () => document.getElementById("themeBtn").click(),
+    j: () => sc.scrollBy({ top: 90 }), k: () => sc.scrollBy({ top: -90 }),
+    " ": () => sc.scrollBy({ top: (e.shiftKey ? -0.9 : 0.9) * sc.clientHeight }),
+    g: () => sc.scrollTo({ top: 0 }), G: () => sc.scrollTo({ top: sc.scrollHeight }),
+  };
+  if (sideTab === "review") Object.assign(keys, {
+    n: () => stepComment(1), p: () => stepComment(-1),
+    e: () => { const c = comments.find(c => c.id === activeId); if (c) startInline(c); },
+  });
+  if (sideTab === "history") Object.assign(keys, {
+    ArrowUp: () => stepVersion(1), ArrowDown: () => stepVersion(-1),
+    ArrowRight: () => stepChange(1), ArrowLeft: () => stepChange(-1), n: () => stepChange(1), p: () => stepChange(-1),
+    s: () => document.getElementById(histMode === "side" ? "histSingle" : "histSide").click(),
+    o: () => document.getElementById("histOnly").click(),
+    b: () => { const btn = histList.querySelector(".ver.on .rb"); if (btn) btn.click(); },
+  });
+  const f = keys[key === " " ? " " : key];
+  if (!f) return;
+  e.preventDefault();
+  f();
+});
+
+document.getElementById("tabReview").onclick = () => setTab("review");
+document.getElementById("tabChat").onclick = () => setTab("chat");
+document.getElementById("tabHist").onclick = () => setTab("history");
+setTab("review");
 poll();
 </script>
 </body>

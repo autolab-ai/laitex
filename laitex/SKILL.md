@@ -70,12 +70,14 @@ not listening are kept and picked up by the next `wait`.
 - `comments`: apply the open comments listed in `comments`.
 - `commit`: commit the source changes made in this review and push them, if the project is
   a git repository. Use a message that summarizes the edits. Do not commit the
-  `.laitex-review/` folder (it ignores itself).
-- `rollback`: the user wants the document back as it was at version `request.version`. If the
-  newest version is still in progress, checkpoint it first so it stays in the history. Run
-  `laitex rollback doc.pdf <version>`, which restores that version's source files into the working
-  tree and prints what changed, then rebuild and run `laitex checkpoint doc.pdf -m "Rolled back to
-  v<version>"`. Tell the user what changed in the chat (or with `laitex say`). The command leaves
+  `.laitex-review/` folder (it ignores itself). Then run `laitex checkpoint doc.pdf -m "<the
+  commit message>"`: it finds the version the commit holds and numbers it as the next release.
+- `rollback`: the user wants the document back as it was at version `request.version`, as if the
+  later versions never happened. Run `laitex rollback doc.pdf <version>`, which restores that
+  version's source files into the working tree, prints what changed, and removes the later
+  versions from the history (with their source snapshots). Then rebuild; the build matches that
+  version, so no new version appears (if it differs, checkpoint it). Tell the user what changed
+  in the chat (or with `laitex say`). The command leaves
   untracked files created after that version in place and lists them; delete them only if you
   created them in this review. If it reports that the version has no source snapshot, restore it
   another way (for example from git history) or tell the user it cannot be done.
@@ -102,6 +104,11 @@ asks for. `page` is the page they were looking at. If they also pressed a button
 Then wait again.
 
 ## Versions
+
+Versions are named v0.1, v0.2, ... until one is committed to git, which becomes v1.0; the next
+ones are v1.1, v1.2, ... until the next commit (v2.0). `laitex checkpoint` notices the commit:
+run it after committing, even if nothing was rebuilt. `request.version` in a rollback is the
+version's number, and `request.name` its name (v0.3), which is what the user sees.
 
 The viewer's History tab shows one version per chunk of your work: each request, or each chat
 task that changed the document. A rebuild starts a version marked "in progress" and later
