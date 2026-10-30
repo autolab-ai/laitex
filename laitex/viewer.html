@@ -57,6 +57,10 @@
   #side { position: fixed; right: 0; top: 0; bottom: 0; width: var(--side); display: flex;
           flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); padding: 10px; }
   #list { flex: 1; overflow-y: auto; min-height: 0; }
+  /* the panel's left edge: drag to resize, double-click for the default width */
+  #sideGrip { position: fixed; top: 0; bottom: 0; right: calc(var(--side) - 3px); width: 7px; z-index: 7; cursor: col-resize; }
+  #sideGrip:hover, #sideGrip.on { background: rgba(217, 119, 87, .35); }
+  body.resizing { user-select: none; -webkit-user-select: none; cursor: col-resize; }
   /* the panel: Review (the comments), Chat and History, each a tab */
   #tabs { display: flex; gap: 4px; margin: 0 0 6px; border-bottom: 1px solid var(--line); }
   #tabs button { font-weight: 600; font-size: 13px; border: 0; background: none; color: var(--muted); padding: 4px 8px 5px;
@@ -184,11 +188,13 @@ const darkQuery = matchMedia("(prefers-color-scheme: dark)");
 function applyTheme() { document.documentElement.classList.toggle("dark", theme ? theme === "dark" : darkQuery.matches); }
 applyTheme();
 darkQuery.addEventListener("change", applyTheme);
+try { const w = +localStorage.getItem("side"); if (w) document.documentElement.style.setProperty("--side", w + "px"); } catch (e) {}
 </script>
 </head>
 <body>
 <div id="main"><div id="pages"></div></div>
 <div id="hist"><div id="histPages"></div></div>
+<div id="sideGrip" title="Drag to resize; double-click for the default width"></div>
 <div id="side" data-tab="review">
   <div id="tabs">
     <button id="tabReview" class="on" title="Your comments on the PDF">Review</button>
@@ -960,8 +966,39 @@ async function poll() {
   } catch (e) { statusEl.textContent = "server offline"; }
   setTimeout(poll, 1500);
 }
+// Pages fit the space left of the panel: after the window or the panel changes size, lay them
+// out again and render them at the new size.
+function relayout() {
+  gen++; layout(); renderVisible();
+  if (histOpen && cmp) { histToken++; histLayout(); }
+}
 let resizeTimer;
-window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { gen++; layout(); renderVisible(); }, 200); });
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(relayout, 200); });
+// The panel's width: drag its left edge. The pages stretch while dragging and are rendered
+// again when the drag ends.
+const grip = document.getElementById("sideGrip");
+function setSide(w, save) {
+  w = Math.round(Math.max(260, Math.min(window.innerWidth - 320, w)));
+  document.documentElement.style.setProperty("--side", w + "px");
+  if (save) try { localStorage.setItem("side", w); } catch (e) {}
+}
+grip.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  grip.setPointerCapture(e.pointerId);
+  grip.classList.add("on"); document.body.classList.add("resizing");
+  const move = ev => { setSide(window.innerWidth - ev.clientX, false); layout(); };
+  const up = ev => {
+    grip.removeEventListener("pointermove", move); grip.removeEventListener("pointerup", up);
+    grip.classList.remove("on"); document.body.classList.remove("resizing");
+    setSide(window.innerWidth - ev.clientX, true); relayout();
+  };
+  grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up);
+});
+grip.addEventListener("dblclick", () => {
+  document.documentElement.style.removeProperty("--side");
+  try { localStorage.removeItem("side"); } catch (e) {}
+  relayout();
+});
 document.getElementById("zoomIn").onclick = () => setZoom(zoom * 1.2);
 document.getElementById("zoomOut").onclick = () => setZoom(zoom / 1.2);
 document.getElementById("zoomFit").onclick = () => setZoom(1);
