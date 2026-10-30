@@ -5,7 +5,7 @@
 <title>laitex</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
-  :root { --side: 340px; color-scheme: light;
+  :root { --side: 340px; --chatw: 0px; color-scheme: light;
           --bg: #e9e9ec; --fg: #222; --page: #fff; --panel: #fafafa; --card: #fff; --line: #ddd; --line2: #ccc;
           --muted: #777; --muted2: #555; --faint: #999; --link: #36c; --tip: #fffef4; --tip-line: #ccb;
           --reply: #eef4ff; --answered: #9bb8e8; --select: rgba(0, 90, 255, .28);
@@ -26,7 +26,7 @@
   .imgs canvas { position: absolute; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--fg); }
-  #main { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); overflow-y: auto; }
+  #main { position: fixed; left: 0; top: 0; bottom: 0; right: calc(var(--side) + var(--chatw)); overflow-y: auto; }
   #pages { padding: 16px 20px 60vh; min-width: fit-content; }
   .page { position: relative; margin: 0 auto 14px; background: var(--page); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   .page canvas { display: block; width: 100%; height: 100%; }
@@ -81,6 +81,37 @@
   #pop .btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   #pop #popCopy { margin-right: auto; }
   button { font: inherit; padding: 3px 10px; }
+  /* the chat with the agent, between the pages and the comments; hidden until opened */
+  :root.chat-open { --chatw: 400px; }
+  #chat { position: fixed; top: 0; bottom: 0; right: var(--side); width: var(--chatw); display: none;
+          flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); }
+  :root.chat-open #chat { display: flex; }
+  #chatHead { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+  #chatHead b { font-size: 14px; }
+  #chatMode { flex: 1; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #chatLog { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
+  .m { margin: 8px 0; line-height: 1.45; overflow-wrap: anywhere; }
+  .m.user { margin-left: 36px; padding: 6px 9px; border-radius: 8px; background: var(--reply); white-space: pre-wrap; }
+  .m.user .via { display: block; margin-top: 2px; font-size: 10px; color: var(--faint); }
+  .m.agent p { margin: 0 0 6px; }
+  .m.agent ul, .m.agent ol { margin: 0 0 6px; padding-left: 18px; }
+  .m.agent li { margin: 1px 0; }
+  .m.agent code { font: 12px ui-monospace, monospace; background: var(--card); border: 1px solid var(--line);
+                  border-radius: 3px; padding: 0 3px; }
+  .m.agent pre { font: 12px ui-monospace, monospace; background: var(--card); border: 1px solid var(--line);
+                 border-radius: 4px; padding: 6px; margin: 0 0 6px; overflow-x: auto; }
+  .m.agent pre code { border: 0; padding: 0; background: none; }
+  .m.agent blockquote { margin: 0 0 6px; padding-left: 8px; border-left: 3px solid var(--line2); color: var(--muted2); }
+  .m.agent a { color: var(--link); }
+  .steps { margin: 4px 0; font-size: 11px; color: var(--faint); }
+  .steps summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .steps div { padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #chatForm { border-top: 1px solid var(--line); padding: 8px 12px 10px; }
+  #chatInput { display: block; width: 100%; height: 58px; resize: vertical; font: inherit; padding: 6px;
+               color: var(--fg); background: var(--card); border: 1px solid var(--line2); border-radius: 6px; }
+  #chatNote { min-height: 15px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+  #chatBtn.unread::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 5px;
+                           border-radius: 50%; background: #d97757; vertical-align: middle; }
   label { font-size: 11px; color: var(--muted2); font-weight: normal; }
 </style>
 <script>
@@ -91,11 +122,20 @@ try { theme = localStorage.getItem("theme"); } catch (e) {}
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
 function applyTheme() { document.documentElement.classList.toggle("dark", theme ? theme === "dark" : darkQuery.matches); }
 applyTheme();
+try { if (localStorage.getItem("chat") === "1") document.documentElement.classList.add("chat-open"); } catch (e) {}
 darkQuery.addEventListener("change", applyTheme);
 </script>
 </head>
 <body>
 <div id="main"><div id="pages"></div></div>
+<div id="chat">
+  <div id="chatHead"><b>Chat</b><span id="chatMode"></span><button id="chatClose" title="Hide the chat">&times;</button></div>
+  <div id="chatLog"></div>
+  <div id="chatForm">
+    <textarea id="chatInput" placeholder="Message the agent. Enter: send, Shift+Enter: new line"></textarea>
+    <div id="chatNote"></div>
+  </div>
+</div>
 <div id="side">
   <h2>Comments <span id="status">loading</span></h2>
   <div id="docname"></div>
@@ -104,7 +144,8 @@ darkQuery.addEventListener("change", applyTheme);
     <span id="zoomLabel" style="min-width:42px;text-align:center">100%</span>
     <button id="zoomIn" title="Cmd +">+</button>
     <button id="zoomFit" title="Cmd 0">fit</button>
-    <button id="themeBtn" title="Dark mode (display only, the PDF is unchanged)" style="margin-left:auto">&#9680;</button>
+    <button id="chatBtn" title="Show or hide the chat with the agent" style="margin-left:auto">chat</button>
+    <button id="themeBtn" title="Dark mode (display only, the PDF is unchanged)">&#9680;</button>
   </div>
   <button id="sendBtn" style="width:100%;margin-bottom:6px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Send comments</button>
   <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:var(--card);color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
@@ -123,6 +164,7 @@ darkQuery.addEventListener("change", applyTheme);
       <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Cmd + / &minus; / 0</kbd></td><td>zoom in / out / fit (or pinch)</td></tr>
       <tr><td style="padding:2px 8px 2px 0"><kbd>Alt+&larr;</kbd></td><td>back after following a link</td></tr>
+      <tr><td style="padding:2px 8px 2px 0">chat</td><td>talk to <span class="an">the agent</span> (hide it again with &times;)</td></tr>
     </table>
   </details>
 </div>
@@ -136,6 +178,8 @@ darkQuery.addEventListener("change", applyTheme);
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 const main = document.getElementById("main");
+// Every write sends this header; the server refuses writes without it (see allowed() in cli.py).
+const H = { "Content-Type": "application/json", "X-Laitex": "1" };
 const pagesEl = document.getElementById("pages");
 const statusEl = document.getElementById("status");
 let mtime = null, comments = [], loading = false, pending = null, activeId = null, inlineEdit = null;
@@ -565,7 +609,7 @@ async function reanchor(d) {
         Math.abs(best.rects[0][0] - c.rects[0][0]) < 0.01 && Math.abs(best.rects[0][1] - c.rects[0][1]) < 0.01;
       if (near) continue;
       c.page = best.page; c.rects = best.rects; changed = true;
-      await fetch("/api/comments/" + c.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+      await fetch("/api/comments/" + c.id, { method: "PATCH", headers: H,
         body: JSON.stringify({ page: c.page, rects: c.rects }) });
     }
     if (changed) { lastCommentsJson = ""; await loadComments(); drawHighlights(); }
@@ -619,13 +663,13 @@ function drawList() {
       if (act === "save") return saveInline(false);
       if (act === "cancel") return cancelInline();
       if (act === "toggle") {
-        await fetch("/api/comments/" + c.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        await fetch("/api/comments/" + c.id, { method: "PATCH", headers: H,
           body: JSON.stringify({ status: c.status === "resolved" ? "open" : "resolved" }) });
         return loadComments();
       }
       if (act === "edit") { ev.stopPropagation(); return startInline(c); }
       if (act === "del") {
-        if (confirm("Delete this comment?")) { await fetch("/api/comments/" + c.id, { method: "DELETE" }); loadComments(); }
+        if (confirm("Delete this comment?")) { await fetch("/api/comments/" + c.id, { method: "DELETE", headers: H }); loadComments(); }
         return;
       }
       activeId = c.id; drawHighlights();
@@ -658,7 +702,7 @@ async function saveInline(send) {
   const c = comments.find(x => x.id === e.id), text = e.text.trim();
   // A changed comment is reopened, so it goes to the agent again with the next send.
   if (c && text && text !== c.comment)
-    await fetch("/api/comments/" + e.id, { method: "PATCH", headers: { "Content-Type": "application/json" },
+    await fetch("/api/comments/" + e.id, { method: "PATCH", headers: H,
       body: JSON.stringify({ comment: text, status: "open" }) });
   lastCommentsJson = ""; await loadComments();
   if (send) sendComments();
@@ -732,7 +776,7 @@ document.getElementById("popCancel").onclick = closePop;
 async function savePop() {
   const text = popText.value.trim();
   if (!pending || !text) return closePop();
-  await fetch("/api/comments", { method: "POST", headers: { "Content-Type": "application/json" },
+  await fetch("/api/comments", { method: "POST", headers: H,
     body: JSON.stringify({ ...pending, comment: text }) });
   closePop(); window.getSelection().removeAllRanges(); loadComments();
 }
@@ -838,7 +882,7 @@ function updateSendBtn() {
 }
 // Both buttons only leave a request for the agent; the viewer never edits files or runs git.
 async function request(action) {
-  request_ = await (await fetch("/api/request", { method: "POST", headers: { "Content-Type": "application/json" },
+  request_ = await (await fetch("/api/request", { method: "POST", headers: H,
                                                   body: JSON.stringify({ action }) })).json();
   updateSendBtn();
 }
@@ -850,6 +894,131 @@ async function sendComments() {
 function askCommit() { request("commit"); }
 sendBtn.onclick = sendComments;
 commitBtn.onclick = askCommit;
+// ---- chat with the agent ----
+// When laitex can read the agent's session transcript, the panel mirrors that session, so it
+// shows the same conversation as the terminal. Messages typed here reach the agent through
+// `laitex wait`, like comments.
+const chatLog = document.getElementById("chatLog"), chatInput = document.getElementById("chatInput");
+const chatBtn = document.getElementById("chatBtn"), chatNote = document.getElementById("chatNote");
+let chatEpoch = "", chatSeq = 0, chatTimer = null;
+let chatOpen = document.documentElement.classList.contains("chat-open");
+const escHtml = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function mdInline(t) {
+  return t.split(/(`[^`]*`)/).map((part, k) => k % 2 ? "<code>" + escHtml(part.slice(1, -1)) + "</code>"
+    : escHtml(part).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+        .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')).join("");
+}
+// Enough Markdown for the agent's replies: paragraphs, lists, code, quotes and headings;
+// tables are shown as preformatted text. HTML in the text is escaped, never rendered.
+const special = /^\s*(```|\||>|#{1,6}\s|([-*+]|\d+[.)])\s)/;
+function md(src) {
+  const out = [], lines = src.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) { i++; continue; }
+    if (/^\s*```/.test(l)) {
+      const code = [];
+      for (i++; i < lines.length && !/^\s*```/.test(lines[i]); i++) code.push(lines[i]);
+      i++;
+      out.push("<pre><code>" + escHtml(code.join("\n")) + "</code></pre>");
+    } else if (/^\s*\|/.test(l)) {
+      const rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
+      out.push("<pre>" + escHtml(rows.join("\n")) + "</pre>");
+    } else if (/^\s*>/.test(l)) {
+      const q = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/, ""));
+      out.push("<blockquote>" + md(q.join("\n")) + "</blockquote>");
+    } else if (/^#{1,6}\s/.test(l)) {
+      out.push("<p><b>" + mdInline(l.replace(/^#+\s*/, "")) + "</b></p>"); i++;
+    } else if (/^\s*([-*+]|\d+[.)])\s/.test(l)) {
+      const tag = /^\s*\d/.test(l) ? "ol" : "ul";
+      let html = "", inner = false;
+      while (i < lines.length && lines[i].trim() && (/^\s*([-*+]|\d+[.)])\s/.test(lines[i]) || /^\s{2,}\S/.test(lines[i]))) {
+        const m = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        if (!m) { html = html.replace(/<\/li>$/, " " + mdInline(lines[i].trim()) + "</li>"); i++; continue; }
+        const nested = m[1].length >= 2;
+        if (nested !== inner) { html += nested ? "<ul>" : "</ul>"; inner = nested; }
+        html += "<li>" + mdInline(m[3]) + "</li>"; i++;
+      }
+      out.push(`<${tag}>${html}${inner ? "</ul>" : ""}</${tag}>`);
+    } else {
+      const para = [lines[i++].trim()];
+      while (i < lines.length && lines[i].trim() && !special.test(lines[i])) para.push(lines[i++].trim());
+      out.push("<p>" + mdInline(para.join(" ")) + "</p>");
+    }
+  }
+  return out.join("");
+}
+function renderChat(items, reset) {
+  const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 60;
+  if (reset) chatLog.replaceChildren();
+  for (const it of items) {
+    if (it.role === "tool") {  // runs of tool calls fold into one line
+      let g = chatLog.lastElementChild;
+      if (!g || !g.classList.contains("steps")) {
+        g = document.createElement("details"); g.className = "steps";
+        g.append(document.createElement("summary")); chatLog.append(g);
+      }
+      const d = document.createElement("div"); d.textContent = it.text; g.append(d);
+      const n = g.children.length - 1;
+      g.firstChild.textContent = (n === 1 ? "1 step: " : n + " steps, last: ") + it.text;
+      continue;
+    }
+    const m = document.createElement("div"); m.className = "m " + it.role;
+    if (it.role === "agent") m.innerHTML = md(it.text); else m.textContent = it.text;
+    if (it.viewer && it.role === "user") {
+      const v = document.createElement("span"); v.className = "via";
+      v.textContent = "sent from the viewer" + (it.page ? ", page " + it.page : "");
+      m.append(v);
+    }
+    if (it.time) m.title = new Date(it.time).toLocaleString();
+    chatLog.append(m);
+  }
+  while (chatLog.children.length > 800) chatLog.firstChild.remove();
+  if (atBottom || reset) chatLog.scrollTop = chatLog.scrollHeight;
+}
+async function pollChat() {
+  clearTimeout(chatTimer);
+  try {
+    const r = await (await fetch(`/api/chat?after=${chatSeq}&epoch=${chatEpoch}`)).json();
+    const reset = r.epoch !== chatEpoch;
+    if (reset || r.items.length) renderChat(r.items, reset);
+    if (!chatOpen && !reset && r.items.some(i => i.role === "agent")) chatBtn.classList.add("unread");
+    chatEpoch = r.epoch;
+    if (r.items.length) chatSeq = r.items[r.items.length - 1].seq;
+    document.getElementById("chatMode").textContent = r.mirror ? `your session with ${agentName}` : `messages go to ${agentName}`;
+    chatNote.textContent = r.pending ? `${r.pending === 1 ? "1 message" : r.pending + " messages"} waiting for ${agentName} to pick up` : "";
+  } catch (e) {}
+  chatTimer = setTimeout(pollChat, chatOpen ? 1500 : 5000);
+}
+function setChat(open) {
+  chatOpen = open;
+  try { localStorage.setItem("chat", open ? "1" : "0"); } catch (e) {}
+  document.documentElement.classList.toggle("chat-open", open);
+  chatBtn.classList.remove("unread");
+  gen++; layout(); renderVisible();  // the pages get narrower or wider
+  if (open) { chatLog.scrollTop = chatLog.scrollHeight; chatInput.focus(); }
+  pollChat();
+}
+async function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  chatInput.value = "";
+  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page: anchor().i + 1 }) });
+  chatLog.scrollTop = chatLog.scrollHeight;
+  pollChat();
+}
+chatInput.addEventListener("keydown", e => {
+  e.stopPropagation();  // the viewer's shortcuts do not apply while typing here
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
+  else if (e.key === "Escape") chatInput.blur();
+});
+chatBtn.onclick = () => setChat(!chatOpen);
+document.getElementById("chatClose").onclick = () => setChat(false);
+pollChat();
 poll();
 </script>
 </body>

@@ -7,8 +7,10 @@ The viewer itself never edits your files or runs git.
 """
 import argparse
 import contextlib
+import glob
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -36,7 +38,8 @@ _THREAD_LOCK = threading.Lock()
 # ---- state on disk --------------------------------------------------------
 
 class State:
-    """Files for one PDF: comments.json, request.json, agent (heartbeat), server.json."""
+    """Files for one PDF: comments.json, request.json, chat.json, agent (heartbeat),
+    transcript.json (the agent's session log, if known) and server.json."""
 
     def __init__(self, pdf):
         self.pdf = os.path.abspath(pdf)
@@ -44,6 +47,8 @@ class State:
         self.dir = os.path.join(os.path.dirname(self.pdf), ".laitex-review", stem)
         self.comments = os.path.join(self.dir, "comments.json")
         self.request = os.path.join(self.dir, "request.json")
+        self.chat = os.path.join(self.dir, "chat.json")
+        self.transcript = os.path.join(self.dir, "transcript.json")
         self.agent = os.path.join(self.dir, "agent")
         self.server = os.path.join(self.dir, "server.json")
         self.log = os.path.join(self.dir, "server.log")
@@ -104,6 +109,191 @@ def now():
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def utc_now():
+    """A timestamp in the format of Claude Code transcripts, so chat and transcript sort together."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
+
+def session_log():
+    """The transcript of the agent session running this command, if the harness keeps one
+    we can read: Claude Code's ~/.claude/projects/<project>/<session id>.jsonl, or any file
+    named by LAITEX_TRANSCRIPT."""
+    path = os.environ.get("LAITEX_TRANSCRIPT")
+    if path:
+        return os.path.abspath(os.path.expanduser(path))
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if sid and re.fullmatch(r"[\w-]+", sid):
+        hits = glob.glob(os.path.join(os.path.expanduser("~/.claude/projects"), "*", sid + ".jsonl"))
+        if hits:
+            return max(hits, key=os.path.getmtime)
+    return None
+
+
+# ---- the chat panel's view of the agent session -------------------------------
+
+TAGS = re.compile(r"<(system-reminder|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr)>.*?</\1>", re.S)
+
+
+def tool_line(b):
+    """One line describing a tool call."""
+    i = b.get("input") or {}
+    name = b.get("name", "tool")
+    if name == "Bash":
+        return i.get("description") or (i.get("command") or "").strip().split("\n")[0][:120]
+    if "file_path" in i:
+        return f"{name} {os.path.basename(i['file_path'])}"
+    for key in ("description", "pattern", "query", "url", "prompt"):
+        if isinstance(i.get(key), str):
+            return f"{name}: {i[key][:100]}"
+    return name
+
+
+def entry_items(d):
+    """What the chat panel shows for one line of a Claude Code transcript: the user's
+    messages, the agent's text, and one line per tool call. Tool results, thinking,
+    reminders and subagent work are left out."""
+    if d.get("isSidechain") or d.get("isMeta") or d.get("isCompactSummary"):
+        return []
+    kind, msg, ts = d.get("type"), d.get("message") or {}, d.get("timestamp") or ""
+    content = msg.get("content")
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content or []
+    out = []
+    if kind == "user":
+        for b in blocks:
+            if b.get("type") == "image":
+                out.append({"role": "user", "text": "[image]", "time": ts})
+            if b.get("type") != "text":
+                continue
+            t = TAGS.sub("", b.get("text") or "").strip()
+            cmd = re.search(r"<command-name>(.*?)</command-name>", t)
+            bash = re.search(r"<bash-input>(.*?)</bash-input>", t, re.S)
+            if cmd:
+                args = re.search(r"<command-args>(.*?)</command-args>", t, re.S)
+                t = (cmd.group(1) + " " + (args.group(1) if args else "")).strip()
+            elif bash:
+                t = "! " + bash.group(1).strip()
+            elif t.startswith(("<", "Caveat:", "This session is being continued")):
+                continue
+            if t:
+                out.append({"role": "user", "text": t, "time": ts, "parent": d.get("parentUuid")})
+    elif kind == "assistant":
+        for b in blocks:
+            if b.get("type") == "text" and (b.get("text") or "").strip():
+                out.append({"role": "agent", "text": b["text"].strip(), "time": ts})
+            elif b.get("type") == "tool_use":
+                out.append({"role": "tool", "text": tool_line(b), "time": ts})
+    return out
+
+
+class Mirror:
+    """The chat panel's messages: the tail of the agent's session transcript, followed live,
+    merged with the messages typed in the viewer and the agent's `laitex say` answers. Every
+    item gets a sequence number so the viewer only fetches what is new."""
+    KEEP = 800
+    CHUNK = 4 << 20
+
+    def __init__(self, st):
+        self.st, self.lock = st, threading.Lock()
+        self.path = None
+        self.reset()
+
+    def reset(self):
+        self.epoch = uuid.uuid4().hex[:8]  # tells the viewer to drop what it has
+        self.items, self.seq, self.seen = [], 0, set()
+        self.offset, self.chat_mtime = 0, None
+
+    def add(self, item):
+        # A prompt sent again (a retry, an edit) starts a new branch from the same parent in
+        # the transcript. Drop the old branch so the panel shows the conversation as it is now,
+        # and change the epoch so the viewer reloads.
+        parent = item.get("parent")
+        if parent:
+            old = next((k for k, i in enumerate(self.items) if i.get("parent") == parent), None)
+            if old is not None:
+                del self.items[old:]
+                self.epoch = uuid.uuid4().hex[:8]
+        self.seq += 1
+        self.items.append(dict(item, seq=self.seq))
+        del self.items[:-self.KEEP]
+
+    def parse(self, data):
+        items = []
+        for line in data.split(b"\n"):
+            try:
+                items += entry_items(json.loads(line))
+            except (ValueError, AttributeError, TypeError):
+                pass
+        return items
+
+    def load_tail(self, path):
+        """Read the transcript backwards, a chunk at a time, until there are enough messages
+        to fill the panel. Returns them and sets the offset to follow the file from."""
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            f.seek(max(0, size - self.CHUNK))
+            tail = f.read()
+            end = size - len(tail) + tail.rfind(b"\n") + 1  # a line still being written waits
+            items, carry, pos = [], b"", end
+            while pos > 0 and sum(i["role"] != "tool" for i in items) < 120 and end - pos < 48 * self.CHUNK:
+                start = max(0, pos - self.CHUNK)
+                f.seek(start)
+                data = f.read(pos - start) + carry
+                carry = b""
+                if start > 0:  # the chunk starts inside a line; finish it with the next chunk
+                    nl = data.find(b"\n")
+                    carry, data = (data, b"") if nl < 0 else (data[:nl + 1], data[nl + 1:])
+                items = self.parse(data) + items
+                pos = start
+        self.offset = end
+        return items
+
+    def chat_items(self):
+        try:
+            self.chat_mtime = os.path.getmtime(self.st.chat)
+        except OSError:
+            self.chat_mtime = None
+        new = [dict(m, viewer=True) for m in read_json(self.st.chat, []) if m["id"] not in self.seen]
+        self.seen.update(m["id"] for m in new)
+        return new
+
+    def update(self):
+        with self.lock:
+            path = read_json(self.st.transcript, {}).get("path")
+            if path and not os.path.exists(path):
+                path = None
+            if path != self.path:  # a new session: load it and merge the chat in by time
+                self.path = path
+                self.reset()
+                items = (self.load_tail(path) if path else []) + self.chat_items()
+                for item in sorted(items, key=lambda i: i.get("time") or ""):
+                    self.add(item)
+                return
+            if path:
+                size = os.path.getsize(path)
+                if size < self.offset:
+                    self.offset = 0
+                if size > self.offset:
+                    with open(path, "rb") as f:
+                        f.seek(self.offset)
+                        data = f.read(size - self.offset)
+                    cut = data.rfind(b"\n") + 1
+                    self.offset += cut
+                    for item in self.parse(data[:cut]):
+                        self.add(item)
+            try:
+                mtime = os.path.getmtime(self.st.chat)
+            except OSError:
+                mtime = None
+            if mtime != self.chat_mtime:
+                for item in self.chat_items():
+                    self.add(item)
+
+    def since(self, after):
+        self.update()
+        with self.lock:
+            return [i for i in self.items if i["seq"] > after]
+
+
 def public(c):
     """A comment without the highlight geometry, which agents do not need."""
     return {k: v for k, v in c.items() if k != "rects"}
@@ -112,6 +302,8 @@ def public(c):
 # ---- HTTP server ------------------------------------------------------------
 
 def make_handler(st, agent_name):
+    mirror = Mirror(st)
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -132,8 +324,28 @@ def make_handler(st, agent_name):
             n = int(self.headers.get("Content-Length", "0"))
             return json.loads(self.rfile.read(n) or b"{}")
 
+        def allowed(self, write=False):
+            """Only the viewer's own page may use the server. The Host must be this server, so
+            a page on another domain cannot reach it by DNS rebinding. Writes also need the
+            X-Laitex header: another site cannot send it to localhost without a CORS preflight,
+            which this server never grants. This matters because chat messages reach an agent
+            that can run commands."""
+            port = self.server.server_address[1]
+            hosts = {f"localhost:{port}", f"127.0.0.1:{port}"}
+            if self.headers.get("Host") not in hosts:
+                return False
+            if write:
+                origin = self.headers.get("Origin")
+                if origin and origin not in {"http://" + h for h in hosts}:
+                    return False
+                if self.headers.get("X-Laitex") != "1":
+                    return False
+            return True
+
         def do_GET(self):
-            path = self.path.split("?")[0]
+            if not self.allowed():
+                return self.send(403, {"error": "forbidden"})
+            path, _, query = self.path.partition("?")
             if path == "/":
                 with open(os.path.join(HERE, "viewer.html"), "rb") as f:
                     return self.send(200, f.read(), "text/html; charset=utf-8")
@@ -160,9 +372,29 @@ def make_handler(st, agent_name):
             if path == "/api/comments":
                 with st.lock():
                     return self.send(200, st.load())
+            if path == "/api/chat":
+                q = dict(kv.partition("=")[::2] for kv in query.split("&") if kv)
+                after = int(q.get("after") or 0) if q.get("epoch") == mirror.epoch else 0
+                items = mirror.since(after)
+                with st.lock():
+                    pending = sum(1 for m in read_json(st.chat, []) if m["role"] == "user" and not m.get("delivered"))
+                return self.send(200, {"epoch": mirror.epoch, "mirror": bool(mirror.path),
+                                       "items": items, "pending": pending})
             self.send(404, {"error": "not found"})
 
         def do_POST(self):
+            if not self.allowed(write=True):
+                return self.send(403, {"error": "forbidden"})
+            if self.path == "/api/chat":
+                data = self.body()
+                text = (data.get("text") or "").strip()
+                if not text:
+                    return self.send(400, {"error": "empty message"})
+                msg = {"id": uuid.uuid4().hex[:8], "role": "user", "text": text,
+                       "time": utc_now(), "page": data.get("page")}
+                with st.lock():
+                    write_json(st.chat, read_json(st.chat, []) + [msg])
+                return self.send(200, msg)
             if self.path == "/api/request":
                 # A request to the agent. The viewer never edits files or runs git;
                 # `laitex wait` on the agent side picks this file up.
@@ -193,6 +425,8 @@ def make_handler(st, agent_name):
             self.send(200, item)
 
         def do_PATCH(self):
+            if not self.allowed(write=True):
+                return self.send(403, {"error": "forbidden"})
             if not self.path.startswith("/api/comments/"):
                 return self.send(404, {"error": "not found"})
             cid = self.path.rsplit("/", 1)[1]
@@ -208,6 +442,8 @@ def make_handler(st, agent_name):
             self.send(200, {"ok": True})
 
         def do_DELETE(self):
+            if not self.allowed(write=True):
+                return self.send(403, {"error": "forbidden"})
             if not self.path.startswith("/api/comments/"):
                 return self.send(404, {"error": "not found"})
             cid = self.path.rsplit("/", 1)[1]
@@ -315,22 +551,38 @@ def cmd_stop(a):
 
 
 def cmd_wait(a):
-    """Block until the reader sends a request, then print it with the open comments."""
+    """Block until the reader sends a request or a chat message, then print it as JSON."""
     st = State(a.pdf)
     st.ensure()
+    log = session_log()
+    if log and read_json(st.transcript, {}).get("path") != log:
+        write_json(st.transcript, {"path": log})  # the chat panel mirrors this session
     deadline = time.time() + a.timeout if a.timeout else None
     while True:
         st.ensure()  # the folder may have been deleted while waiting
         with open(st.agent, "w") as f:  # heartbeat: the viewer shows "agent listening"
             f.write(now())
         req = st.get_request()
-        if req and not req.get("taken"):
+        fresh = req and not req.get("taken")
+        chat = [m for m in read_json(st.chat, []) if m["role"] == "user" and not m.get("delivered")]
+        if fresh or chat:
             with st.lock():
-                req["taken"] = now()
-                write_json(st.request, req)
-                comments = [public(c) for c in st.load() if c.get("status") == "open"]
-            json.dump({"pdf": st.pdf, "request": req, "comments": comments},
-                      sys.stdout, indent=2, ensure_ascii=False)
+                out = {"pdf": st.pdf, "request": None}
+                if fresh:
+                    req["taken"] = now()
+                    write_json(st.request, req)
+                    out["request"] = req
+                    out["comments"] = [public(c) for c in st.load() if c.get("status") == "open"]
+                if chat:
+                    msgs = read_json(st.chat, [])
+                    for m in msgs:
+                        if m["role"] == "user" and not m.get("delivered"):
+                            m["delivered"] = now()
+                    write_json(st.chat, msgs)
+                    out["chat"] = [{k: m[k] for k in ("text", "page", "time") if m.get(k) is not None}
+                                   for m in chat]
+                    out["mirror"] = bool(read_json(st.transcript, {}).get("path"))
+            json.dump(out, sys.stdout, indent=2, ensure_ascii=False)
             print()
             return
         if deadline and time.time() > deadline:
@@ -362,6 +614,16 @@ def cmd_reply(a):
         hit[0]["replied"] = now()
         st.save(items)
     print(f"{a.id}: {a.status}")
+
+
+def cmd_say(a):
+    """Post a message to the viewer's chat panel."""
+    st = State(a.pdf)
+    text = sys.stdin.read().strip() if a.text == "-" else a.text
+    msg = {"id": uuid.uuid4().hex[:8], "role": "agent", "text": text, "time": utc_now()}
+    with st.lock():
+        write_json(st.chat, read_json(st.chat, []) + [msg])
+    print("said")
 
 
 def cmd_done(a):
@@ -423,6 +685,8 @@ def main(argv=None):
     s.add_argument("text", help="reply text, or - to read it from stdin")
     s.add_argument("--status", default="resolved", choices=STATUSES,
                    help="resolved: change made (default); answered: reply only, e.g. a question")
+    s = pdf_cmd("say", cmd_say, "answer in the viewer's chat panel")
+    s.add_argument("text", help="message text, or - to read it from stdin")
     pdf_cmd("done", cmd_done, "mark the current request as handled")
     sub.add_parser("guide", help="print the instructions for the agent").set_defaults(fn=cmd_guide)
     s = sub.add_parser("install-skill", help="install the agent skill (default: ~/.claude/skills)")

@@ -31,11 +31,12 @@ keeps the skill current.
 2. Open the viewer: `laitex open path/to/doc.pdf`. It prints the URL. Tell the user it is open
    and that they can select text to comment and press Cmd+Enter (Ctrl+Enter) to send.
 3. Wait for a request: `laitex wait path/to/doc.pdf`. It blocks until the user presses a
-   button, then prints JSON and exits. If your harness can run a command in the background and wake you
+   button or writes in the chat panel, then prints JSON and exits. If your harness can run a command in the background and wake you
    when it exits (Claude Code: `run_in_background: true`), do that, so you stay free to talk
    to the user meanwhile. Otherwise run it in the foreground with `--timeout 600` and start it again
    on exit code 2 (timeout).
-4. Handle the request (below), then run `laitex done path/to/doc.pdf`.
+4. Handle the request (below), then run `laitex done path/to/doc.pdf`. For a chat message
+   alone (`request` is null), skip `done`.
 5. Go back to step 3. Stop when the user says the review is over, then
    `laitex stop path/to/doc.pdf` if they want the viewer closed.
 
@@ -69,6 +70,27 @@ not listening are kept and picked up by the next `wait`.
 - `commit`: commit the source changes made in this review and push them, if the project is
   a git repository. Use a message that summarizes the edits. Do not commit the
   `.laitex-review/` folder (it ignores itself).
+
+## Chat
+
+The viewer has a chat panel. A message typed there arrives through `laitex wait` as
+
+```json
+{"pdf": "/abs/path/doc.pdf", "request": null,
+ "chat": [{"text": "is the paper over the page limit?", "page": 9, "time": "2026-10-30T19:01:31.000Z"}],
+ "mirror": true}
+```
+
+It is the user talking to you, the same as a message in the terminal: answer it, and do the work it
+asks for. `page` is the page they were looking at. If they also pressed a button, `request` and
+`comments` are filled in as usual; handle both.
+
+- `mirror: true`: the panel shows your session transcript (Claude Code), so the user reads your
+  normal reply there. Answer in the conversation as usual; do not also use `laitex say`.
+- `mirror: false`: the user does not see your terminal. Post the answer with
+  `laitex say doc.pdf "..."` (or `-` to read it from stdin).
+
+Then wait again.
 
 ## Handling comments
 

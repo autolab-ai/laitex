@@ -118,6 +118,10 @@ The viewer also:
   the target on hover;
 - jumps to a comment when you click it in the sidebar, where you can also edit, resolve,
   reopen or delete it. An edited comment goes to the agent again with the next send;
+- has a chat with the agent (the chat button; × hides it). With Claude Code the panel mirrors
+  the agent's session, so you see the same conversation as in the terminal, with tool calls
+  folded into one line. A message you type there reaches the agent through `laitex wait`, and
+  only the viewer's own page can send one: the server refuses writes from other origins;
 - has a dark mode (the ◐ button, or your system setting until you press it). It only changes
   how the pages are shown: text and plots are inverted, photos keep their colors, and the PDF
   and its source stay as they are.
@@ -125,14 +129,15 @@ The viewer also:
 ## How the agent connects
 
 The viewer and the agent share a folder next to the PDF, `.laitex-review/<name>/`, which ignores
-itself in git. The agent does not touch that folder directly. It uses five commands
+itself in git. The agent does not touch that folder directly. It uses six commands
 (`laitex` here is `~/.laitex/bin/laitex`, or the command on PATH after a pip install):
 
 | Command | What it does |
 | --- | --- |
 | `laitex open doc.pdf` | start the viewer (once per PDF) and open the browser; prints the URL |
-| `laitex wait doc.pdf` | block until you press Send or Commit, then print the request as JSON |
+| `laitex wait doc.pdf` | block until you press Send or Commit or write in the chat, then print it as JSON |
 | `laitex reply doc.pdf ID "text"` | answer a comment and mark it resolved (`--status answered` to only reply) |
+| `laitex say doc.pdf "text"` | answer in the chat panel (not needed when the panel mirrors the agent's session) |
 | `laitex done doc.pdf` | tell the viewer the request is handled |
 | `laitex comments doc.pdf` | list open comments as JSON (`--status all` for every comment) |
 
