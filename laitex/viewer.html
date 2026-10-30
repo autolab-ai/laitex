@@ -92,6 +92,11 @@
   #pop textarea { width: 100%; height: 90px; font: inherit; }
   #pop .btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   #pop #popCopy { margin-right: auto; }
+  #pop .btns button.main { background: #d97757; color: #fff; border: 1px solid #d97757; border-radius: 4px; }
+  #tabs .cnt { display: inline-block; min-width: 16px; margin-left: 4px; padding: 0 4px; border-radius: 8px;
+               font-size: 10px; line-height: 15px; text-align: center; color: #fff; background: #d97757; }
+  .m.user .q { margin-bottom: 4px; padding-left: 6px; border-left: 3px solid #f2c500; color: var(--muted); font-style: italic;
+               max-height: 3.9em; overflow: hidden; }
   button { font: inherit; padding: 3px 10px; }
   /* history: the panel's History tab picks the builds; the comparison covers the page area */
   #hist { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); z-index: 6;
@@ -289,8 +294,8 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
 </div>
 <button id="back" title="Back (Alt+Left)">&larr; back</button>
 <div id="pop">
-  <textarea id="popText" placeholder="Enter: save · Shift+Enter: new line · Cmd+Enter: save and send · Esc: cancel"></textarea>
-  <div class="btns"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popCancel">Cancel</button><button id="popSave">Save</button></div>
+  <textarea id="popText"></textarea>
+  <div class="btns"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popCancel">Cancel</button><button id="popAsk" title="Send it to the agent in the chat, with the selected text">Ask in chat</button><button id="popSave" title="Keep it as a review comment">Comment</button></div>
 </div>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -844,6 +849,12 @@ const pop = document.getElementById("pop"), popText = document.getElementById("p
 function openPop(r) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 340)) + "px";
   pop.style.top = Math.min(r.bottom + 6, window.innerHeight - 160) + "px";
+  // In the Chat tab, what you write about a selection goes to the chat; elsewhere it is a comment.
+  const chat = sideTab === "chat";
+  popText.placeholder = chat ? "Enter: ask in the chat · Shift+Enter: new line · Esc: cancel"
+                             : "Enter: save the comment · Shift+Enter: new line · Cmd+Enter: save and send · Esc: cancel";
+  document.getElementById("popAsk").classList.toggle("main", chat);
+  document.getElementById("popSave").classList.toggle("main", !chat);
   pop.style.display = "block"; popText.value = "";
   drawHighlights();  // keep the selected text marked while typing
   popText.focus();
@@ -900,6 +911,17 @@ async function savePop() {
   closePop(); window.getSelection().removeAllRanges(); loadComments();
 }
 document.getElementById("popSave").onclick = savePop;
+// Ask about the selection in the chat: the message carries the selected text and where it is.
+async function askPop() {
+  const text = popText.value.trim();
+  if (!pending || !text) return closePop();
+  const { page, quote, context } = pending;
+  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page, quote, context }) });
+  closePop(); window.getSelection().removeAllRanges();
+  if (sideTab !== "chat") setTab("chat");
+  chatLog.scrollTop = chatLog.scrollHeight; pollChat();
+}
+document.getElementById("popAsk").onclick = askPop;
 // The comment box takes focus, so the page selection is no longer what the browser copies.
 // Copy the selected PDF text instead: with the button, or with the system's copy shortcut or
 // Edit menu while nothing is selected inside the comment box.
@@ -928,7 +950,7 @@ popText.addEventListener("keydown", async e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !e.shiftKey && !e.altKey &&
       pending && popText.selectionStart === popText.selectionEnd) { e.preventDefault(); return copyQuote(); }
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); await savePop(); sendComments(); }
-  else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); savePop(); }
+  else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); sideTab === "chat" ? askPop() : savePop(); }
   else if (e.key === "Escape") { e.stopPropagation(); closePop(); window.getSelection().removeAllRanges(); }
 });
 // Elsewhere: Esc clears the selection, Cmd+Enter sends all open comments.
@@ -1024,6 +1046,9 @@ const sendBtn = document.getElementById("sendBtn");
 const commitBtn = document.getElementById("commitBtn");
 function updateSendBtn() {
   const n = comments.filter(c => c.status === "open").length, t = request_;
+  const tr = document.getElementById("tabReview");
+  tr.replaceChildren("Review");
+  if (n) { const b = document.createElement("span"); b.className = "cnt"; b.textContent = n; b.title = `${n} open comment${n === 1 ? "" : "s"}`; tr.append(b); }
   sendBtn.textContent = t && t.action === "comments" ? `Sent, ${agentName} is working…`
     : `Send ${n} open comment${n === 1 ? "" : "s"} to ${agentName}`;
   commitBtn.textContent = t && t.action === "commit" ? `Commit requested, ${agentName} is working…`
@@ -1639,6 +1664,7 @@ function renderChat(items, reset) {
     }
     const m = document.createElement("div"); m.className = "m " + it.role;
     if (it.role === "agent") m.innerHTML = md(it.text); else m.textContent = it.text;
+    if (it.quote) { const q = document.createElement("div"); q.className = "q"; q.textContent = it.quote; m.prepend(q); }
     if (it.viewer && it.role === "user") {
       const v = document.createElement("span"); v.className = "via";
       v.textContent = "sent from the viewer" + (it.page ? ", page " + it.page : "");
@@ -1650,7 +1676,12 @@ function renderChat(items, reset) {
   while (chatLog.children.length > 800) chatLog.firstChild.remove();
   if (atBottom || reset) chatLog.scrollTop = chatLog.scrollHeight;
 }
-async function pollChat() {
+let chatBusy = null;
+function pollChat() {  // one fetch at a time: two at once would both add the same new messages
+  if (!chatBusy) chatBusy = pollChatOnce().finally(() => { chatBusy = null; });
+  return chatBusy;
+}
+async function pollChatOnce() {
   clearTimeout(chatTimer);
   try {
     const r = await (await fetch(`/api/chat?after=${chatSeq}&epoch=${chatEpoch}`)).json();

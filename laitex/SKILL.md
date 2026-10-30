@@ -93,7 +93,9 @@ The viewer has a chat panel. A message typed there arrives through `laitex wait`
 ```
 
 It is the user talking to you, the same as a message in the terminal: answer it, and do the work it
-asks for. `page` is the page they were looking at. If they also pressed a button, `request` and
+asks for. `page` is the page they were looking at. A message about text they selected also has
+`quote` (the selected text) and `context` (the text around it, as in comments): read "this" or
+"here" in the message as that passage. If they also pressed a button, `request` and
 `comments` are filled in as usual; handle both.
 
 - `mirror: true`: the panel shows your session transcript (Claude Code), so the user reads your
