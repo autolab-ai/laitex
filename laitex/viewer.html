@@ -252,7 +252,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
       <div>
         <h4>Anywhere</h4>
         <table>
-          <tr><td><kbd>R</kbd> <kbd>C</kbd> <kbd>H</kbd></td><td>Review, Chat, History tab</td></tr>
+          <tr><td><kbd><span class="tabmod">Ctrl</span>+R</kbd> <kbd><span class="tabmod">Ctrl</span>+C</kbd> <kbd><span class="tabmod">Ctrl</span>+H</kbd></td><td>Review, Chat, History tab, also while typing</td></tr>
           <tr><td><kbd>h</kbd> <kbd>?</kbd></td><td>this list</td></tr>
           <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>scroll the pages down, up</td></tr>
           <tr><td><kbd>Space</kbd> <kbd>Shift+Space</kbd></td><td>a screen down, up</td></tr>
@@ -264,7 +264,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
         </table>
         <h4>Chat</h4>
         <table>
-          <tr><td><kbd>C</kbd></td><td>go to the message box</td></tr>
+          <tr><td><kbd><span class="tabmod">Ctrl</span>+C</kbd></td><td>go to the message box</td></tr>
           <tr><td><kbd>Enter</kbd> <kbd>Shift+Enter</kbd></td><td>send, new line</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>leave the message box</td></tr>
         </table>
@@ -1697,6 +1697,7 @@ async function pollChatOnce() {
 }
 function setTab(tab) {
   sideTab = tab;
+  if (tab !== "chat" && document.activeElement === chatInput) chatInput.blur();
   document.getElementById("side").dataset.tab = tab;
   document.getElementById("tabReview").classList.toggle("on", tab === "review");
   document.getElementById("tabChat").classList.toggle("on", tab === "chat");
@@ -1725,6 +1726,17 @@ const help = document.getElementById("help");
 const setHelp = open => help.classList.toggle("open", open);
 document.getElementById("helpBtn").onclick = () => setHelp(true);
 help.addEventListener("click", e => { if (e.target === help) setHelp(false); });
+// Tabs: Ctrl+R, Ctrl+C and Ctrl+H on a Mac (Cmd keeps reload and copy), Alt elsewhere, where Ctrl
+// has them. They work while typing too, so the chat box can be left without the mouse.
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+document.querySelectorAll(".tabmod").forEach(e => { e.textContent = isMac ? "Ctrl" : "Alt"; });
+window.addEventListener("keydown", e => {
+  const mod = isMac ? e.ctrlKey && !e.metaKey && !e.altKey : e.altKey && !e.ctrlKey && !e.metaKey;
+  const tab = mod && !e.shiftKey && { KeyR: "review", KeyC: "chat", KeyH: "history" }[e.code];
+  if (!tab) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  setTab(tab);
+}, true);
 window.addEventListener("keydown", e => {  // capture: closing the help should not also leave a tab
   if (help.classList.contains("open") && (e.key === "Escape" || e.key === "h" || e.key === "?")) {
     setHelp(false); e.preventDefault(); e.stopImmediatePropagation();
@@ -1762,7 +1774,6 @@ window.addEventListener("keydown", e => {
   const sc = scroller(), key = e.key;
   const keys = {
     h: () => setHelp(true), "?": () => setHelp(true),
-    R: () => setTab("review"), C: () => setTab("chat"), H: () => setTab("history"),
     d: () => document.getElementById("themeBtn").click(),
     j: () => sc.scrollBy({ top: 90 }), k: () => sc.scrollBy({ top: -90 }),
     " ": () => sc.scrollBy({ top: (e.shiftKey ? -0.9 : 0.9) * sc.clientHeight }),
