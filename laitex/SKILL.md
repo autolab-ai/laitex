@@ -145,6 +145,9 @@ first build is kept when you run `laitex open`.
   only replied, for example with a question; the user can edit the comment, which reopens it.
   Pass `-` as the text to read a long reply from stdin.
 - Keep replies short: what changed, quoting the new wording when it is a rewrite.
+- The user can answer your reply from the comment card. The comment then comes back open with a
+  `thread`: your replies and their follow-ups, oldest first. Act on the last message, read with
+  the rest of the thread, and reply as usual; your reply is added to the thread.
 - `laitex comments doc.pdf --status all` lists every comment, including resolved ones, if you
   need earlier context.
 

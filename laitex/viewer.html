@@ -85,6 +85,8 @@
   .c textarea.te { display: block; width: 100%; font: inherit; resize: vertical; padding: 4px;
                    border: 1px solid var(--answered); border-radius: 4px; overflow: hidden; }
   .c .r { white-space: pre-wrap; margin-top: 6px; padding: 6px; background: var(--reply); border-radius: 4px; }
+  .c .u { white-space: pre-wrap; margin-top: 6px; padding: 2px 0 2px 8px; border-left: 2px solid #d97757; }
+  .c textarea.te.rp { margin-top: 6px; }
   .c .meta { font-size: 11px; color: var(--faint); margin-top: 4px; display: flex; gap: 8px; }
   .c .meta a { color: var(--link); cursor: pointer; }
   #pop { position: fixed; display: none; z-index: 10; width: 320px; background: var(--card); border: 1px solid var(--line2);
@@ -280,6 +282,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>Cmd+C</kbd></td><td>copy the selected text</td></tr>
           <tr><td><kbd>n</kbd> <kbd>p</kbd></td><td>next, previous comment</td></tr>
           <tr><td><kbd>e</kbd></td><td>edit the selected comment</td></tr>
+          <tr><td><kbd>r</kbd></td><td>reply to the agent's answer on it</td></tr>
           <tr><td><kbd>Cmd+Enter</kbd></td><td>send open comments to <span class="an">the agent</span></td></tr>
           <tr><td><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
         </table>
@@ -791,13 +794,17 @@ function drawList() {
   for (const c of items) {
     const el = document.createElement("div");
     el.className = "c " + c.status;
-    const ed = inlineEdit && inlineEdit.id === c.id;
+    const ed = inlineEdit && inlineEdit.id === c.id, editing = ed && inlineEdit.mode === "edit", replying = ed && inlineEdit.mode === "reply";
+    // The conversation after the comment: the agent's replies and your follow-ups.
+    const thread = c.thread || (c.reply ? [{ role: "agent", text: c.reply }] : []);
     el.innerHTML = `<div class="q">${esc(c.quote)}</div>` +
-      (ed ? `<textarea class="te" rows="2"></textarea>` : `<div class="t">${esc(c.comment)}</div>`) +
-      (c.reply ? `<div class="r">${esc(c.reply)}</div>` : "") +
+      (editing ? `<textarea class="te" rows="2"></textarea>` : `<div class="t">${esc(c.comment)}</div>`) +
+      thread.map(m => `<div class="${m.role === "agent" ? "r" : "u"}">${esc(m.text)}</div>`).join("") +
+      (replying ? `<textarea class="te rp" rows="2" placeholder="Reply. Enter: save · Cmd+Enter: save and send · Esc: cancel"></textarea>` : "") +
       `<div class="meta">p.${c.page}${c.version ? " of " + esc(c.version) : ""} · ${c.status}` +
       (ed ? ` <a data-act="save">save</a> <a data-act="cancel">cancel</a>`
-          : ` <a data-act="toggle">${c.status === "resolved" ? "reopen" : "resolve"}</a>` +
+          : (thread.length ? ` <a data-act="reply">reply</a>` : "") +
+            ` <a data-act="toggle">${c.status === "resolved" ? "reopen" : "resolve"}</a>` +
             ` <a data-act="edit">edit</a> <a data-act="del">delete</a>`) + `</div>`;
     if (ed) setupInlineEdit(el.querySelector("textarea"));
     el.onclick = async ev => {
@@ -811,6 +818,7 @@ function drawList() {
         return loadComments();
       }
       if (act === "edit") { ev.stopPropagation(); return startInline(c); }
+      if (act === "reply") { ev.stopPropagation(); return startReply(c); }
       if (act === "del") {
         if (confirm("Delete this comment?")) { await fetch("/api/comments/" + c.id, { method: "DELETE", headers: H }); loadComments(); }
         return;
@@ -836,15 +844,20 @@ async function loadComments() {
   }
 }
 
-// Editing a comment turns its text in the card into a text box.
-// Enter saves, Shift+Enter adds a new line, Cmd+Enter saves and sends, Esc cancels.
-function startInline(c) { closePop(); inlineEdit = { id: c.id, text: c.comment }; drawList(); }
+// Editing a comment turns its text in the card into a text box, and replying to the agent's
+// answer adds one under it. Enter saves, Shift+Enter adds a new line, Cmd+Enter saves and
+// sends, Esc cancels.
+function startInline(c) { closePop(); inlineEdit = { id: c.id, text: c.comment, mode: "edit" }; drawList(); }
+function startReply(c) { closePop(); inlineEdit = { id: c.id, text: "", mode: "reply" }; drawList(); }
 function cancelInline() { inlineEdit = null; drawList(); }
 async function saveInline(send) {
   const e = inlineEdit; inlineEdit = null;
   const c = comments.find(x => x.id === e.id), text = e.text.trim();
-  // A changed comment is reopened, so it goes to the agent again with the next send.
-  if (c && text && text !== c.comment)
+  // A changed comment, or one you replied to, is reopened, so it goes to the agent again
+  // with the next send.
+  if (c && text && e.mode === "reply")
+    await fetch("/api/comments/" + e.id, { method: "PATCH", headers: H, body: JSON.stringify({ followup: text }) });
+  else if (c && text && text !== c.comment)
     await fetch("/api/comments/" + e.id, { method: "PATCH", headers: H,
       body: JSON.stringify({ comment: text, status: "open" }) });
   lastCommentsJson = ""; await loadComments();
@@ -1850,6 +1863,7 @@ window.addEventListener("keydown", e => {
   if (sideTab === "review") Object.assign(keys, {
     n: () => stepComment(1), p: () => stepComment(-1),
     e: () => { const c = comments.find(c => c.id === activeId); if (c) startInline(c); },
+    r: () => { const c = comments.find(c => c.id === activeId); if (c && (c.thread || c.reply)) startReply(c); },
   });
   if (sideTab === "history") Object.assign(keys, {
     ArrowUp: () => stepVersion(1), ArrowDown: () => stepVersion(-1),

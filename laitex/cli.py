@@ -531,6 +531,14 @@ def git_snapshot(versions, n, label):
     return {"root": root, "commit": commit, "ref": ref, "pdf": pdf, "head": head}
 
 
+def thread_of(c):
+    """The conversation after a comment: the agent's replies and the user's follow-ups.
+    Comments answered before threads existed have only `reply`."""
+    if c.get("thread"):
+        return list(c["thread"])
+    return [{"role": "agent", "text": c["reply"], "time": c.get("replied", "")}] if c.get("reply") else []
+
+
 def public(c):
     """A comment without the highlight geometry, which agents do not need."""
     return {k: v for k, v in c.items() if k != "rects"}
@@ -697,6 +705,9 @@ def make_handler(st, agent_name, versions):
                         for k in ("status", "comment", "reply", "page", "rects", "context"):
                             if k in data:
                                 c[k] = data[k]
+                        if str(data.get("followup") or "").strip():  # the user answers the agent's reply
+                            c["thread"] = thread_of(c) + [{"role": "user", "text": data["followup"].strip(), "time": now()}]
+                            c["status"] = "open"
                 st.save(items)
             self.send(200, {"ok": True})
 
@@ -877,6 +888,10 @@ def cmd_reply(a):
         hit = [c for c in items if c["id"] == a.id]
         if not hit:
             sys.exit(f"laitex: no comment with id {a.id}")
+        thread = thread_of(hit[0])
+        if thread and thread[-1]["role"] == "agent":
+            thread.pop()  # a second reply before the user answers revises the first
+        hit[0]["thread"] = thread + [{"role": "agent", "text": text, "time": now()}]
         hit[0]["reply"] = text
         hit[0]["status"] = a.status
         hit[0]["replied"] = now()
