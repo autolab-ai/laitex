@@ -921,6 +921,33 @@ function contextOf(pageEl, quote, range) {
   return txt.slice(Math.max(0, i - 150), i) + "[[" + quote + "]]" + txt.slice(i + quote.length, i + quote.length + 150);
 }
 document.addEventListener("mousedown", hideTip);
+// The boxes of the selected text. range.getClientRects() also returns the box of every element
+// the range passes over, and a selection across pages passes over whole pages, canvases and
+// layers, so the boxes come from the selected text nodes of the text layers alone.
+// Page furniture is left out: margin line numbers, and running headers and page numbers in the
+// top and bottom bands, which a selection across pages always runs through.
+function furniture(n) {
+  const page = n.parentElement.closest(".page"), pr = page.getBoundingClientRect(), r = n.parentElement.getBoundingClientRect();
+  const fx = (r.left - pr.left) / pr.width, fy = ((r.top + r.bottom) / 2 - pr.top) / pr.height;
+  return fy < 0.075 || fy > 0.92 || (/^\s*\d+\s*$/.test(n.textContent) && (fx < 0.12 || fx > 0.85));
+}
+function textBoxes(range) {
+  const root = range.commonAncestorContainer.nodeType === 3 ? range.commonAncestorContainer.parentNode : range.commonAncestorContainer;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => range.intersectsNode(n) && n.textContent.trim() && n.parentElement.closest(".textLayer") && !furniture(n)
+      ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+  });
+  const out = [];
+  out.text = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const r = document.createRange();
+    const a = n === range.startContainer ? range.startOffset : 0, b = n === range.endContainer ? range.endOffset : n.length;
+    r.setStart(n, a); r.setEnd(n, b);
+    for (const box of r.getClientRects()) if (box.width > 1 && box.height > 1) out.push(box);
+    out.text.push(n.textContent.slice(a, b));
+  }
+  return out;
+}
 document.addEventListener("mouseup", ev => {
   document.querySelectorAll(".textLayer.selecting").forEach(t => t.classList.remove("selecting"));
   if (pop.contains(ev.target)) return;
@@ -941,7 +968,7 @@ document.addEventListener("mouseup", ev => {
       const i = all.indexOf(pageEl), j = all.indexOf(endEl);
       if (i >= 0 && j > i) pageEls = all.slice(i, j + 1);
     }
-    const boxes = [...range.getClientRects()].filter(r => r.width > 1 && r.height > 1);
+    const boxes = textBoxes(range);
     const per = pageEls.map(el => {
       const pr = el.getBoundingClientRect();
       const mine = boxes.filter(r => {
@@ -951,7 +978,8 @@ document.addEventListener("mouseup", ev => {
       return { page: +el.dataset.page, rects: mine.map(r => [(r.left - pr.left) / pr.width, (r.top - pr.top) / pr.height, r.width / pr.width, r.height / pr.height]) };
     }).filter(x => x.rects.length);
     if (!per.length) return;
-    const quote = sel.toString().replace(/\s+/g, " ").trim();
+    // Across pages, the quote is the selected text without the furniture in between.
+    const quote = (per.length > 1 ? boxes.text.join(" ").replace(/\s+([,.;:!?)\]])/g, "$1") : sel.toString()).replace(/\s+/g, " ").trim();
     pending = { page: per[0].page, quote, context: contextOf(pageEl, quote, range), rects: per[0].rects };
     if (per.length > 1) pending.more = per.slice(1);
     // On a History page of an older version, the comment is about that version.
