@@ -190,14 +190,12 @@
   #help td:first-child { white-space: nowrap; }
 </style>
 <script>
-// Dark mode is a display setting kept in this browser. Without a choice it follows the system.
-// Set here, before the page is drawn, so it does not flash light first.
+// Dark mode is a display setting kept in this browser. The PDF is shown as it is until you turn
+// dark mode on. Set here, before the page is drawn, so it does not flash.
 let theme = null;
 try { theme = localStorage.getItem("theme"); } catch (e) {}
-const darkQuery = matchMedia("(prefers-color-scheme: dark)");
-function applyTheme() { document.documentElement.classList.toggle("dark", theme ? theme === "dark" : darkQuery.matches); }
+function applyTheme() { document.documentElement.classList.toggle("dark", theme === "dark"); }
 applyTheme();
-darkQuery.addEventListener("change", applyTheme);
 try { const w = +localStorage.getItem("side"); if (w) document.documentElement.style.setProperty("--side", w + "px"); } catch (e) {}
 </script>
 </head>

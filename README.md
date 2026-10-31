@@ -132,7 +132,7 @@ The viewer also:
   the agent's session, so you see the same conversation as in the terminal, with tool calls
   folded into one line. A message you type there reaches the agent through `laitex wait`, and
   only the viewer's own page can send one: the server refuses writes from other origins;
-- has a dark mode (the ◐ button, or your system setting until you press it). It only changes
+- has a dark mode (the ◐ button or `d`; off until you turn it on). It only changes
   how the pages are shown: text and plots are inverted, photos keep their colors, and the PDF
   and its source stay as they are.
 
