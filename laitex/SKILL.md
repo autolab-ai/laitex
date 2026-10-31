@@ -28,7 +28,10 @@ keeps the skill current.
 
 1. Find the PDF and how it is built (a Makefile, `latexmk`, `typst compile`, a build script).
    Build it once if it is missing or stale.
-2. Open the viewer: `laitex open path/to/doc.pdf`. It prints the URL. Tell the user it is open
+2. Open the viewer: `laitex open path/to/doc.pdf`. It prints the URL. Its Log tab shows the
+   errors and warnings of the last build, read from `doc.log` next to the PDF. If the build
+   writes its log elsewhere (a build folder, a temporary copy), add `--log path/to/doc.log`; a
+   `doc.blg` next to the log is read too. Tell the user it is open
    and that they can select text to comment and press Cmd+Enter (Ctrl+Enter) to send.
 3. Wait for a request: `laitex wait path/to/doc.pdf`. It blocks until the user presses a
    button or writes in the chat panel, then prints JSON and exits. If your harness can run a command in the background and wake you
@@ -72,6 +75,14 @@ not listening are kept and picked up by the next `wait`.
   a git repository. Use a message that summarizes the edits. Do not commit the
   `.laitex-review/` folder (it ignores itself). Then run `laitex checkpoint doc.pdf -m "<the
   commit message>"`: it finds the version the commit holds and numbers it as the next release.
+- `fix`: fix the compile errors and warnings in `request.issues`, which the user picked in the
+  Log tab. Each has `level` (`error`, `warning`, or `box` for an overfull or underfull box),
+  `message`, `file` and `line` when the log names them (relative to the log's folder), `count`,
+  and `detail`, the lines of the log it came from. Fix the cause in the source, rebuild, and
+  check the new log with `laitex log doc.pdf`, which prints the same list as JSON. Some
+  warnings are better left alone (a font substitution, a box a fraction of a point too wide);
+  say so instead of contorting the text. Then tell the user what you fixed and what you left,
+  in the conversation, or with `laitex say` if the chat does not mirror your session.
 - `rollback`: the user wants the document back as it was at version `request.version`, as if the
   later versions never happened. Run `laitex rollback doc.pdf <version>`, which restores that
   version's source files into the working tree, prints what changed, and removes the later

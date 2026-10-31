@@ -74,7 +74,8 @@
   #status { font-size: 11px; color: var(--muted); font-weight: normal; white-space: nowrap; }
   #docname { font-size: 12px; color: var(--muted2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pane { flex: 1; min-height: 0; display: none; flex-direction: column; }
-  #side[data-tab="review"] #reviewTab, #side[data-tab="chat"] #chatTab, #side[data-tab="history"] #histTab { display: flex; }
+  #side[data-tab="review"] #reviewTab, #side[data-tab="chat"] #chatTab, #side[data-tab="history"] #histTab,
+  #side[data-tab="log"] #logTab { display: flex; }
   #agent { font-size: 11px; color: var(--muted); margin: -2px 0 8px; }
   #agent i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #bbb; margin-right: 5px; }
   #agent.on i { background: #2a9d4b; }
@@ -99,6 +100,38 @@
   #pop .btns button.main { background: #d97757; color: #fff; border: 1px solid #d97757; border-radius: 4px; }
   #tabs .cnt { display: inline-block; min-width: 16px; margin-left: 4px; padding: 0 4px; border-radius: 8px;
                font-size: 10px; line-height: 15px; text-align: center; color: #fff; background: #d97757; }
+  #tabs .cnt.err { background: #d64545; }
+  #tabs .cnt.warn { background: #c9881c; }
+  /* the Log tab: errors, warnings and bad boxes of the last build */
+  #logHead { font-size: 11px; color: var(--muted); margin: 0 0 6px; overflow-wrap: anywhere; }
+  #logHead .stale { color: #c9881c; }
+  #logHead code { font-size: 11px; }
+  #logFilters { display: flex; gap: 5px; flex-wrap: wrap; margin: 0 0 6px; }
+  #logFilters button { font-size: 12px; padding: 1px 9px; border: 1px solid var(--line); border-radius: 12px;
+                       background: none; color: var(--faint); cursor: pointer; }
+  #logFilters button.on { color: var(--fg); background: var(--card); }
+  #logFilters button.on[data-level="error"] { border-color: #d64545; }
+  #logFilters button.on[data-level="warning"] { border-color: #c9881c; }
+  #logFilters button.on[data-level="box"] { border-color: var(--muted); }
+  #logList { flex: 1; overflow-y: auto; min-height: 0; }
+  #logList .none { color: var(--muted); font-size: 12px; padding: 8px 2px; }
+  .issue { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: 6px;
+           padding: 5px 8px; margin-bottom: 6px; font-size: 12.5px; cursor: pointer; }
+  .issue.error { border-left-color: #d64545; }
+  .issue.warning { border-left-color: #c9881c; }
+  .issue.on { outline: 2px solid #d97757; outline-offset: -1px; }
+  .issue .row { display: flex; align-items: center; gap: 6px; }
+  .issue .lvl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+  .issue.error .lvl { color: #d64545; }
+  .issue.warning .lvl { color: #c9881c; }
+  .issue .where { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .issue .fix { margin-left: auto; flex: none; font-size: 11px; padding: 0 7px; border: 1px solid #d97757; border-radius: 4px;
+                color: #d97757; background: none; cursor: pointer; }
+  #logList.busy .fix { opacity: .4; pointer-events: none; }
+  .issue .msg { margin-top: 2px; overflow-wrap: anywhere; }
+  .issue pre { display: none; margin: 6px 0 0; padding: 6px; max-height: 240px; overflow: auto; white-space: pre-wrap;
+               overflow-wrap: anywhere; font-size: 11px; background: var(--panel); border-radius: 4px; }
+  .issue.open pre { display: block; }
   .m.user .q { margin-bottom: 4px; padding-left: 6px; border-left: 3px solid #f2c500; color: var(--muted); font-style: italic;
                max-height: 3.9em; overflow: hidden; }
   button { font: inherit; padding: 3px 10px; }
@@ -213,6 +246,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
     <button id="tabReview" class="on" title="Your comments on the PDF">Review</button>
     <button id="tabChat" title="Talk to the agent">Chat</button>
     <button id="tabHist" title="Every version of the PDF, and what changed in each">History</button>
+    <button id="tabLog" title="Errors and warnings from the last build">Log</button>
   </div>
   <div id="docline"><span id="docname"></span><span id="status">loading</span></div>
   <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
@@ -252,6 +286,16 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
     </div>
     <div id="histList"></div>
   </div>
+  <div id="logTab" class="pane">
+    <div id="logHead"></div>
+    <div id="logFilters">
+      <button data-level="error" title="Show errors (e)">errors <b>0</b></button>
+      <button data-level="warning" title="Show warnings (w)">warnings <b>0</b></button>
+      <button data-level="box" title="Show overfull and underfull boxes (b)">bad boxes <b>0</b></button>
+    </div>
+    <button id="fixAllBtn" style="width:100%;margin-bottom:8px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Ask the agent to fix all</button>
+    <div id="logList"></div>
+  </div>
 </div>
 <div id="tip"></div>
 <div id="help" role="dialog" aria-label="Keyboard shortcuts">
@@ -261,7 +305,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
       <div>
         <h4>Anywhere</h4>
         <table>
-          <tr><td><kbd><span class="tabmod">Ctrl</span>+R</kbd> <kbd><span class="tabmod">Ctrl</span>+C</kbd> <kbd><span class="tabmod">Ctrl</span>+H</kbd></td><td>Review, Chat, History tab, also while typing</td></tr>
+          <tr><td><kbd><span class="tabmod">Ctrl</span>+R</kbd> <kbd><span class="tabmod">Ctrl</span>+C</kbd> <kbd><span class="tabmod">Ctrl</span>+H</kbd> <kbd><span class="tabmod">Ctrl</span>+L</kbd></td><td>Review, Chat, History, Log tab, also while typing</td></tr>
           <tr><td><kbd>h</kbd> <kbd>?</kbd></td><td>this list</td></tr>
           <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>scroll the pages down, up</td></tr>
           <tr><td><kbd>Space</kbd> <kbd>Shift+Space</kbd></td><td>a screen down, up</td></tr>
@@ -300,6 +344,14 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>b</kbd></td><td>roll back to the selected version</td></tr>
           <tr><td>select text</td><td>comment on that version</td></tr>
           <tr><td>drag the gray, or <kbd class="altkey">Alt</kbd>+drag</td><td>move the pages around</td></tr>
+        </table>
+        <h4>Log</h4>
+        <table>
+          <tr><td><kbd>n</kbd> <kbd>p</kbd> or <kbd>&darr;</kbd> <kbd>&uarr;</kbd></td><td>next, previous issue</td></tr>
+          <tr><td><kbd>Enter</kbd></td><td>show the lines of the log</td></tr>
+          <tr><td><kbd>f</kbd></td><td>ask <span class="an">the agent</span> to fix the selected issue</td></tr>
+          <tr><td><kbd>F</kbd></td><td>ask <span class="an">the agent</span> to fix all shown</td></tr>
+          <tr><td><kbd>e</kbd> <kbd>w</kbd> <kbd>b</kbd></td><td>show or hide errors, warnings, bad boxes</td></tr>
         </table>
       </div>
     </div>
@@ -1068,6 +1120,9 @@ async function poll() {
     ag.querySelector("span").textContent = cap(agentName) + (st.listening ? " is listening" : " is not listening");
     ag.title = st.listening ? "" : "Ask your agent to review this PDF with laitex; requests wait here until it does.";
     updateSendBtn();
+    updateLogTab(st.log);
+    const sig = st.log ? `${st.log.path}|${st.log.mtime}` : "";
+    if (sig !== logSig) { logSig = sig; if (sideTab === "log") loadLog(); else logData = null; }
     const m = st.mtime;
     if (m && m !== mtime && pop.style.display !== "block") {
       const first = mtime === null; mtime = m;
@@ -1145,6 +1200,7 @@ function updateSendBtn() {
     : `Ask ${agentName} to commit and push`;
   sendBtn.disabled = !!t || n === 0; sendBtn.style.opacity = sendBtn.disabled ? .5 : 1;
   commitBtn.disabled = !!t; commitBtn.style.opacity = t ? .5 : 1;
+  if (typeof updateFixBtns === "function") updateFixBtns();
 }
 // Both buttons only leave a request for the agent; the viewer never edits files or runs git.
 async function request(action) {
@@ -1909,6 +1965,8 @@ function setTab(tab) {
   document.getElementById("tabReview").classList.toggle("on", tab === "review");
   document.getElementById("tabChat").classList.toggle("on", tab === "chat");
   document.getElementById("tabHist").classList.toggle("on", tab === "history");
+  document.getElementById("tabLog").classList.toggle("on", tab === "log");
+  if (tab === "log") loadLog();
   chatOpen = tab === "chat";
   if (chatOpen) { chatBtn.classList.remove("unread"); chatLog.scrollTop = chatLog.scrollHeight; chatInput.focus(); }
   pollChat();
@@ -1927,20 +1985,134 @@ chatInput.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
   else if (e.key === "Escape") chatInput.blur();
 });
+// ---- log: errors, warnings and bad boxes of the last build ----
+// The server reads the build's log (compile_log in cli.py). The fix buttons only leave a request
+// for the agent, naming the issues; the viewer never edits files.
+const logList = document.getElementById("logList"), fixAllBtn = document.getElementById("fixAllBtn");
+const LOG_NAMES = { error: ["error", "errors"], warning: ["warning", "warnings"], box: ["bad box", "bad boxes"] };
+let logData = null, logSig = null, logSel = null;
+const logOpen = new Set();  // the issues whose log lines are shown
+const logShow = { error: true, warning: true, box: true };
+try { Object.assign(logShow, JSON.parse(localStorage.getItem("logShow") || "{}")); } catch (e) {}
+const logShown = () => logData ? logData.items.filter(it => logShow[it.level]) : [];
+async function loadLog() {
+  try { logData = await (await fetch("/api/log")).json(); } catch (e) { return; }
+  renderLog();
+}
+function updateLogTab(info) {  // the tab's badges: errors in red, warnings in amber
+  const t = document.getElementById("tabLog");
+  t.replaceChildren("Log");
+  if (!info || !info.exists) return;
+  for (const [lv, cls] of [["error", "err"], ["warning", "warn"]]) {
+    const n = info.counts[lv];
+    if (!n) continue;
+    const b = document.createElement("span");
+    b.className = "cnt " + cls; b.textContent = n; b.title = `${n} ${LOG_NAMES[lv][n === 1 ? 0 : 1]} in the last build`;
+    t.append(b);
+  }
+}
+function updateFixBtns() {
+  const t = request_, n = logShown().length;
+  fixAllBtn.textContent = t && t.action === "fix" ? `Fix requested, ${agentName} is working…`
+    : n ? `Ask ${agentName} to fix all ${n} shown` : "Nothing to fix";
+  fixAllBtn.disabled = !!t || !n; fixAllBtn.style.opacity = fixAllBtn.disabled ? .5 : 1;
+  logList.classList.toggle("busy", !!t);
+}
+function renderLog() {
+  if (!logData) return;
+  const head = document.getElementById("logHead");
+  if (!logData.exists) {
+    head.innerHTML = "";
+    head.append(`No log at ${logData.path}. If the build writes it elsewhere, ask ${agentName} to run `);
+    const c = document.createElement("code"); c.textContent = `laitex log ${document.title} --set path/to/the.log`;
+    head.append(c, ".");
+  } else {
+    const when = new Date(logData.mtime * 1000);
+    head.textContent = `${logData.path.split("/").pop()}, written ${when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    head.title = logData.path;
+    if (logData.stale) {
+      const w = document.createElement("span"); w.className = "stale";
+      w.textContent = " · older than the PDF, so maybe from an earlier build"; head.append(w);
+    }
+  }
+  document.querySelectorAll("#logFilters button").forEach(b => {
+    b.classList.toggle("on", logShow[b.dataset.level]);
+    b.querySelector("b").textContent = logData.counts ? logData.counts[b.dataset.level] : 0;
+  });
+  const items = logShown(), top = logList.scrollTop;
+  if (!items.some(it => it.id === logSel)) logSel = null;
+  logList.replaceChildren();
+  if (logData.exists && !items.length) {
+    const d = document.createElement("div"); d.className = "none";
+    d.textContent = logData.items.length ? "Nothing shown: turn on a filter above." : "No errors or warnings in the last build.";
+    logList.append(d);
+  }
+  for (const it of items) {
+    const card = document.createElement("div");
+    card.className = `issue ${it.level}` + (it.id === logSel ? " on" : "") + (logOpen.has(it.id) ? " open" : "");
+    card.dataset.id = it.id;
+    const row = document.createElement("div"); row.className = "row";
+    const lvl = document.createElement("span"); lvl.className = "lvl"; lvl.textContent = LOG_NAMES[it.level][0];
+    const where = document.createElement("span"); where.className = "where";
+    where.textContent = (it.file ? it.file + (it.line ? ":" + it.line : "") : "") + (it.count > 1 ? `  ×${it.count}` : "");
+    const fix = document.createElement("button"); fix.className = "fix"; fix.textContent = "fix";
+    fix.title = `Ask ${agentName} to fix this (f)`;
+    fix.onclick = e => { e.stopPropagation(); askFix([it.id]); };
+    row.append(lvl, where, fix);
+    const msg = document.createElement("div"); msg.className = "msg"; msg.textContent = it.message;
+    const pre = document.createElement("pre"); pre.textContent = it.detail;
+    card.append(row, msg, pre);
+    card.onclick = () => { selectIssue(it.id); toggleIssue(it.id); };
+    logList.append(card);
+  }
+  logList.scrollTop = top;
+  updateFixBtns();
+}
+function selectIssue(id) {
+  logSel = id;
+  logList.querySelectorAll(".issue").forEach(c => c.classList.toggle("on", c.dataset.id === id));
+  const c = logList.querySelector(`.issue[data-id="${id}"]`);
+  if (c) c.scrollIntoView({ block: "nearest" });
+}
+function toggleIssue(id) {
+  if (logOpen.has(id)) logOpen.delete(id); else logOpen.add(id);
+  const c = logList.querySelector(`.issue[data-id="${id}"]`);
+  if (c) { c.classList.toggle("open", logOpen.has(id)); c.scrollIntoView({ block: "nearest" }); }
+}
+function stepIssue(dir) {
+  const items = logShown();
+  if (!items.length) return;
+  const i = items.findIndex(it => it.id === logSel);
+  selectIssue(items[i < 0 ? (dir > 0 ? 0 : items.length - 1) : Math.max(0, Math.min(items.length - 1, i + dir))].id);
+}
+function toggleLevel(level) {
+  logShow[level] = !logShow[level];
+  try { localStorage.setItem("logShow", JSON.stringify(logShow)); } catch (e) {}
+  renderLog();
+}
+async function askFix(ids) {
+  if (request_ || !ids.length) return;
+  const r = await fetch("/api/request", { method: "POST", headers: H, body: JSON.stringify({ action: "fix", ids }) });
+  if (!r.ok) { await loadLog(); return; }  // the log changed in the meantime
+  request_ = await r.json();
+  updateSendBtn();
+}
+fixAllBtn.onclick = () => askFix(logShown().map(it => it.id));
+document.querySelectorAll("#logFilters button").forEach(b => { b.onclick = () => toggleLevel(b.dataset.level); });
 // ---- keyboard ----
 // Single keys work whenever no text box has the focus; h lists them.
 const help = document.getElementById("help");
 const setHelp = open => help.classList.toggle("open", open);
 document.getElementById("helpBtn").onclick = () => setHelp(true);
 help.addEventListener("click", e => { if (e.target === help) setHelp(false); });
-// Tabs: Ctrl+R, Ctrl+C and Ctrl+H on a Mac (Cmd keeps reload and copy), Alt elsewhere, where Ctrl
+// Tabs: Ctrl+R, Ctrl+C, Ctrl+H and Ctrl+L on a Mac (Cmd keeps reload and copy), Alt elsewhere, where Ctrl
 // has them. They work while typing too, so the chat box can be left without the mouse.
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 document.querySelectorAll(".tabmod").forEach(e => { e.textContent = isMac ? "Ctrl" : "Alt"; });
 document.querySelectorAll(".altkey").forEach(e => { if (isMac) e.textContent = "⌥ Option"; });  // Alt is Option on a Mac
 window.addEventListener("keydown", e => {
   const mod = isMac ? e.ctrlKey && !e.metaKey && !e.altKey : e.altKey && !e.ctrlKey && !e.metaKey;
-  const tab = mod && !e.shiftKey && { KeyR: "review", KeyC: "chat", KeyH: "history" }[e.code];
+  const tab = mod && !e.shiftKey && { KeyR: "review", KeyC: "chat", KeyH: "history", KeyL: "log" }[e.code];
   if (!tab) return;
   e.preventDefault(); e.stopImmediatePropagation();
   setTab(tab);
@@ -2000,6 +2172,13 @@ window.addEventListener("keydown", e => {
     m: () => document.getElementById("histMovedBox").click(),
     b: () => { const btn = histList.querySelector(".ver.on .rb"); if (btn) btn.click(); },
   });
+  if (sideTab === "log") Object.assign(keys, {
+    n: () => stepIssue(1), p: () => stepIssue(-1), ArrowDown: () => stepIssue(1), ArrowUp: () => stepIssue(-1),
+    Enter: () => { if (logSel) toggleIssue(logSel); },
+    f: () => { if (logSel) askFix([logSel]); }, F: () => askFix(logShown().map(it => it.id)),
+    e: () => toggleLevel("error"), w: () => toggleLevel("warning"), b: () => toggleLevel("box"),
+    Escape: () => setTab("review"),
+  });
   const f = keys[key === " " ? " " : key];
   if (!f) return;
   e.preventDefault();
@@ -2009,6 +2188,7 @@ window.addEventListener("keydown", e => {
 document.getElementById("tabReview").onclick = () => setTab("review");
 document.getElementById("tabChat").onclick = () => setTab("chat");
 document.getElementById("tabHist").onclick = () => setTab("history");
+document.getElementById("tabLog").onclick = () => setTab("log");
 setTab("review");
 poll();
 </script>

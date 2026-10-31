@@ -132,6 +132,12 @@ The viewer also:
   the agent's session, so you see the same conversation as in the terminal, with tool calls
   folded into one line. A message you type there reaches the agent through `laitex wait`, and
   only the viewer's own page can send one: the server refuses writes from other origins;
+- shows the errors and warnings of the last build in the Log tab, as Overleaf does: LaTeX
+  errors, warnings and overfull or underfull boxes from `doc.log`, and BibTeX's from `doc.blg`,
+  each with its file and line and the lines of the log it came from. The tab counts errors and
+  warnings, filters by kind, and asks the agent to fix one issue (its fix button, or `f`) or all
+  the shown ones (`F`). The log is the one next to the PDF unless `laitex open --log` names
+  another;
 - has a dark mode (the ◐ button or `d`; off until you turn it on). It only changes
   how the pages are shown: text and plots are inverted, photos keep their colors, and the PDF
   and its source stay as they are.
@@ -152,6 +158,7 @@ itself in git. The agent does not touch that folder directly. It uses these comm
 | `laitex checkpoint doc.pdf -m "..."` | close the current version with a summary, and record the source in git for rollback |
 | `laitex rollback doc.pdf N` | restore the source of version N into the working tree |
 | `laitex comments doc.pdf` | list open comments as JSON (`--status all` for every comment) |
+| `laitex log doc.pdf` | print the errors and warnings of the last build as JSON (`--set path/to/doc.log` to read another log) |
 
 `laitex wait` prints:
 

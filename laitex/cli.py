@@ -55,6 +55,7 @@ class State:
         self.server = os.path.join(self.dir, "server.json")
         self.log = os.path.join(self.dir, "server.log")
         self.lockfile = os.path.join(self.dir, "lock")
+        self.logcfg = os.path.join(self.dir, "log.json")
 
     def ensure(self):
         os.makedirs(self.dir, exist_ok=True)
@@ -84,6 +85,10 @@ class State:
 
     def get_request(self):
         return read_json(self.request, None)
+
+    def log_path(self):
+        """The compile log: the one set with `laitex open --log`, else <name>.log beside the PDF."""
+        return read_json(self.logcfg, {}).get("path") or os.path.splitext(self.pdf)[0] + ".log"
 
     def agent_age(self):
         try:
@@ -554,6 +559,202 @@ def public(c):
 
 # ---- HTTP server ------------------------------------------------------------
 
+# ---- the compile log: errors and warnings of the last LaTeX build ----------------
+
+LOG_WRAP = 79  # TeX breaks log lines at max_print_line characters (79 in TeX Live and MiKTeX)
+LOG_LEVELS = ("error", "warning", "box")
+_SOURCE_EXT = (r"tex|sty|cls|clo|cfg|def|fd|ldf|bbl|aux|toc|lof|lot|out|ltx|bib|bst|tikz|dict|lua|"
+               r"nav|snm|vrb|ind|idx|gls|glo|ist|mkiv|mkii")
+_OPEN_FILE = re.compile(r"\(([^\s()]*\.(?:" + _SOURCE_EXT + r"))(?=[\s()\[]|$)", re.I)
+_FILE_LINE_ERROR = re.compile(r"^(\S.*?\.(?:" + _SOURCE_EXT + r")):(\d+): (.*)$", re.I)
+_WARNING = re.compile(r"^((?:LaTeX|Package \S+|Class \S+|Module \S+)(?: Font)? Warning): (.*)$")
+_PDFTEX_WARNING = re.compile(r"pdfTeX warning(?: \(([^)]*)\))?: (.*)$")
+_BOX = re.compile(r"^(Overfull|Underfull) \\[hv]box \(([^)]*)\)(.*?)(?: at lines? (\d+)(?:--\d+)?)?$")
+_CONTINUED = re.compile(r"^\([\w@.\-]+\)\s+")
+
+
+def _log_lines(raw):
+    """The log as logical lines: TeX breaks long lines at exactly LOG_WRAP bytes, so a physical
+    line of that length continues on the next one."""
+    out, buf = [], b""
+    for line in raw.replace(b"\r\n", b"\n").split(b"\n"):
+        buf += line
+        if len(line) == LOG_WRAP:
+            continue
+        out.append(buf.decode("utf-8", "replace"))
+        buf = b""
+    if buf:
+        out.append(buf.decode("utf-8", "replace"))
+    return out
+
+
+def _source_name(path, base):
+    """A file name as the user knows it: relative to the log's folder, or the bare name of a
+    file from the TeX distribution."""
+    if path.startswith("./"):
+        return path[2:]
+    if os.path.isabs(path):
+        if "/texmf" in path or "/texlive/" in path or "/miktex/" in path.lower():
+            return os.path.basename(path)
+        rel = os.path.relpath(path, base)
+        return path if rel.startswith("..") else rel
+    return path
+
+
+def parse_tex_log(raw, base, main=None):
+    """Errors, warnings and over/underfull boxes in a TeX log (bytes). Each has a level, a
+    message, the source file and line when the log says them, and the log lines it came from.
+    The current file is followed through the '(' and ')' with which TeX marks opening and
+    closing files; lines that belong to a message are not scanned for them."""
+    lines = _log_lines(raw)
+    items, stack = [], []
+
+    def current():
+        return next((f for f in reversed(stack) if f), main)
+
+    def add(level, message, file, line, detail):
+        items.append({"level": level, "message": message.strip(), "file": file, "line": line,
+                      "detail": "\n".join(detail).strip("\n")[:2000], "source": "tex"})
+
+    i = 0
+    while i < len(lines):
+        text = lines[i]
+        fle = _FILE_LINE_ERROR.match(text)
+        if text.startswith("! ") or fle:
+            message = fle.group(3) if fle else text[2:]
+            file, line = (_source_name(fle.group(1), base), int(fle.group(2))) if fle else (current(), None)
+            detail, j = [text], i + 1
+            while j < len(lines) and j - i < 20 and not lines[j].startswith("! ") and not _FILE_LINE_ERROR.match(lines[j]):
+                detail.append(lines[j])
+                at = re.match(r"l\.(\d+)", lines[j])
+                j += 1
+                if at:
+                    line = line or int(at.group(1))
+                    if j < len(lines) and lines[j].strip():
+                        detail.append(lines[j])  # the rest of the source line, after the break
+                        j += 1
+                    break
+            add("error", message, file, line, detail)
+            i = j
+            continue
+        w = _WARNING.match(text)
+        if w:
+            detail, j = [text], i + 1
+            while j < len(lines) and _CONTINUED.match(lines[j]):
+                detail.append(lines[j])
+                j += 1
+            message = " ".join([w.group(2)] + [_CONTINUED.sub("", d) for d in detail[1:]])
+            at = re.search(r"on input line (\d+)", message)
+            add("warning", f"{w.group(1)}: {message}", current(), int(at.group(1)) if at else None, detail)
+            i = j
+            continue
+        b = _BOX.match(text)
+        if b:
+            detail, j = [text], i + 1
+            while j < len(lines) and lines[j].strip() and j - i < 8:
+                detail.append(lines[j])
+                j += 1
+            add("box", text, current(), int(b.group(4)) if b.group(4) else None, detail)
+            i = j
+            continue
+        p = _PDFTEX_WARNING.search(text)
+        if p:
+            add("warning", "pdfTeX warning" + (f" ({p.group(1)})" if p.group(1) else "") + ": " + p.group(2),
+                current(), None, [text])
+            text = text[:p.start()]  # the files opened or closed before it still count
+        k = 0
+        while True:
+            m = re.compile(r"[()]").search(text, k)
+            if not m:
+                break
+            k = m.start()
+            if text[k] == ")":
+                if stack:
+                    stack.pop()
+                k += 1
+            else:
+                f = _OPEN_FILE.match(text, k)
+                stack.append(_source_name(f.group(1), base) if f else None)
+                k = f.end() if f else k + 1
+        i += 1
+    return items
+
+
+def parse_blg(text):
+    """Errors and warnings in a BibTeX log (.blg)."""
+    items, lines = [], text.splitlines()
+    for i, line in enumerate(lines):
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if line.startswith("Warning--"):
+            at = re.match(r"^--line (\d+) of file (.+)$", nxt)
+            items.append({"level": "warning", "message": "BibTeX: " + line[len("Warning--"):],
+                          "file": at.group(2) if at else None, "line": int(at.group(1)) if at else None,
+                          "detail": line + ("\n" + nxt if at else ""), "source": "bibtex"})
+            continue
+        e = re.match(r"^(.*)---line (\d+) of file (.+)$", line)
+        if e and e.group(1).strip():
+            items.append({"level": "error", "message": "BibTeX: " + e.group(1), "file": e.group(3),
+                          "line": int(e.group(2)), "detail": "\n".join(lines[i:i + 4]), "source": "bibtex"})
+            continue
+        e = re.match(r"^(.*)---while reading file (.+)$", line)
+        if e:
+            items.append({"level": "error", "message": f"BibTeX: {e.group(1)} (while reading {e.group(2)})",
+                          "file": e.group(2), "line": None, "detail": line, "source": "bibtex"})
+    return items
+
+
+_LOG_CACHE = {}
+
+
+def compile_log(st):
+    """The parsed log of the last build, with counts, cached until the log changes. The log is
+    the one set with `laitex open --log`, else <name>.log next to the PDF; a .blg beside it is
+    read too."""
+    path = st.log_path()
+    blg = os.path.splitext(path)[0] + ".blg"
+    sig = []
+    for f in (path, blg):
+        try:
+            s = os.stat(f)
+            sig.append((s.st_mtime_ns, s.st_size))
+        except OSError:
+            sig.append(None)
+    try:
+        pdf_mtime = os.path.getmtime(st.pdf)
+    except OSError:
+        pdf_mtime = 0
+    key = (path, tuple(sig))
+    hit = _LOG_CACHE.get(st.pdf)
+    if not hit or hit[0] != key:
+        items = []
+        if sig[0]:
+            with open(path, "rb") as f:
+                items += parse_tex_log(f.read(), os.path.dirname(path),
+                                       os.path.splitext(os.path.basename(st.pdf))[0] + ".tex")
+        if sig[1]:
+            with open(blg, encoding="utf-8", errors="replace") as f:
+                items += parse_blg(f.read())
+        merged = {}
+        for it in items:  # the same message from the same place counts once
+            k = (it["level"], it["message"], it["file"], it["line"])
+            if k in merged:
+                merged[k]["count"] += 1
+            else:
+                it["id"] = hashlib.sha1(repr(k).encode()).hexdigest()[:8]
+                it["count"] = 1
+                merged[k] = it
+        order = {lv: n for n, lv in enumerate(LOG_LEVELS)}
+        items = sorted(merged.values(), key=lambda it: order[it["level"]])
+        hit = (key, items)
+        _LOG_CACHE[st.pdf] = hit
+    items = hit[1]
+    mtime = sig[0][0] / 1e9 if sig[0] else None
+    return {"path": path, "exists": bool(sig[0]), "mtime": mtime,
+            "stale": bool(mtime and pdf_mtime and mtime < pdf_mtime - 120),
+            "counts": {lv: sum(1 for it in items if it["level"] == lv) for lv in LOG_LEVELS},
+            "items": items}
+
+
 def make_handler(st, agent_name, versions):
     mirror = Mirror(st)
 
@@ -621,12 +822,15 @@ def make_handler(st, agent_name, versions):
                     "request": st.get_request(),
                     "listening": age is not None and age < LISTEN_WINDOW,
                     "agent_name": agent_name,
+                    "log": {k: v for k, v in compile_log(st).items() if k != "items"},
                 })
             if path == "/api/comments":
                 with st.lock():
                     return self.send(200, st.load())
             if path == "/api/versions":
                 return self.send(200, versions.public())
+            if path == "/api/log":
+                return self.send(200, compile_log(st))
             m = re.fullmatch(r"/version/(\d+)\.pdf", path)
             if m:
                 try:
@@ -675,6 +879,13 @@ def make_handler(st, agent_name, versions):
                     if action == "rollback":
                         req["version"] = int(data.get("version") or 0)
                         req["name"] = versions.names().get(req["version"], "")
+                    if action == "fix":  # the issues are taken from the log here, by id
+                        log, ids = compile_log(st), set(map(str, data.get("ids") or []))
+                        req["log"] = log["path"]
+                        req["issues"] = [{k: it[k] for k in ("level", "message", "file", "line", "count", "detail")}
+                                         for it in log["items"] if it["id"] in ids][:200]
+                        if not req["issues"]:
+                            return self.send(409, {"error": "those issues are no longer in the log"})
                     write_json(st.request, req)
                 return self.send(200, req)
             if self.path != "/api/comments":
@@ -781,8 +992,28 @@ def cmd_serve(a):
             os.remove(st.server)
 
 
+def set_log(st, path):
+    st.ensure()
+    write_json(st.logcfg, {"path": os.path.abspath(path)} if path else {})
+
+
+def cmd_log(a):
+    st = State(a.pdf)
+    if a.set is not None:
+        set_log(st, a.set)
+        print(f"laitex: reading the log from {st.log_path()}")
+        return
+    log = compile_log(st)
+    if not log["exists"]:
+        sys.exit(f"laitex: no log at {log['path']}; point to it with `laitex log {a.pdf} --set path/to/doc.log`")
+    json.dump(log, sys.stdout, indent=2, ensure_ascii=False)
+    print()
+
+
 def cmd_open(a):
     st = State(a.pdf)
+    if a.log:
+        set_log(st, a.log)
     if not os.path.exists(st.pdf):
         print(f"laitex: {st.pdf} does not exist yet; the viewer will show it once it is built.",
               file=sys.stderr)
@@ -1036,8 +1267,11 @@ def main(argv=None):
                        help='name shown on the buttons, e.g. Claude (default: "the agent")')
         if name == "open":
             s.add_argument("--no-browser", action="store_true", help="only start the server")
+            s.add_argument("--log", help="the build's log, if it is not <name>.log next to the PDF")
             s.add_argument("--app", action="store_true", help="open a chromeless Chrome window")
     pdf_cmd("stop", cmd_stop, "stop the viewer for a PDF")
+    s = pdf_cmd("log", cmd_log, "print the errors and warnings of the last build as JSON")
+    s.add_argument("--set", metavar="LOG", help="read the log from LOG from now on (\"\" for <name>.log next to the PDF)")
     s = pdf_cmd("wait", cmd_wait, "block until the reader sends a request; print it as JSON")
     s.add_argument("--timeout", type=float, default=0, help="seconds; exit 2 if nothing arrives")
     s = pdf_cmd("comments", cmd_comments, "print comments as JSON")
