@@ -268,7 +268,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>g</kbd> <kbd>G</kbd></td><td>first page, last page</td></tr>
           <tr><td><kbd>Cmd +</kbd> <kbd>Cmd &minus;</kbd> <kbd>Cmd 0</kbd></td><td>zoom in, out, fit (or pinch)</td></tr>
           <tr><td><kbd>d</kbd></td><td>dark mode</td></tr>
-          <tr><td><kbd>Alt+&larr;</kbd></td><td>back after following a link</td></tr>
+          <tr><td><kbd><span class="altkey">Alt</span>+&larr;</kbd></td><td>back after following a link</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>cancel, close, back to Review</td></tr>
         </table>
         <h4>Chat</h4>
@@ -299,13 +299,13 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>m</kbd></td><td>show moved text, in blue</td></tr>
           <tr><td><kbd>b</kbd></td><td>roll back to the selected version</td></tr>
           <tr><td>select text</td><td>comment on that version</td></tr>
-          <tr><td>drag the gray, or <kbd>Alt</kbd>+drag</td><td>move the pages around</td></tr>
+          <tr><td>drag the gray, or <kbd class="altkey">Alt</kbd>+drag</td><td>move the pages around</td></tr>
         </table>
       </div>
     </div>
   </div>
 </div>
-<button id="back" title="Back (Alt+Left)">&larr; back</button>
+<button id="back" title="Back (Alt+Left, Option+Left on a Mac)">&larr; back</button>
 <div id="pop">
   <textarea id="popText"></textarea>
   <div class="btns"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popCancel">Cancel</button><button id="popSave" title="Keep it as a review comment">Comment</button></div>
@@ -1937,6 +1937,7 @@ help.addEventListener("click", e => { if (e.target === help) setHelp(false); });
 // has them. They work while typing too, so the chat box can be left without the mouse.
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 document.querySelectorAll(".tabmod").forEach(e => { e.textContent = isMac ? "Ctrl" : "Alt"; });
+document.querySelectorAll(".altkey").forEach(e => { if (isMac) e.textContent = "⌥ Option"; });  // Alt is Option on a Mac
 window.addEventListener("keydown", e => {
   const mod = isMac ? e.ctrlKey && !e.metaKey && !e.altKey : e.altKey && !e.ctrlKey && !e.metaKey;
   const tab = mod && !e.shiftKey && { KeyR: "review", KeyC: "chat", KeyH: "history" }[e.code];
