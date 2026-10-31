@@ -409,7 +409,7 @@ class Versions:
     def set_stats(self, n, stats):
         """Store how much text version n changed against the one before. The viewer counts it,
         since it is the side that reads the text; the server only keeps the numbers."""
-        keys = ("la", "ld", "ca", "cd", "changes")
+        keys = ("la", "ld", "ca", "cd", "changes", "moves")
         clean = {k: int(stats.get(k) or 0) for k in keys}
         with self.st.lock():
             items = self.list()

@@ -11,7 +11,8 @@
           --reply: #eef4ff; --answered: #9bb8e8; --select: rgba(0, 90, 255, .28);
           --hl: rgba(255, 210, 0, .38); --hl-resolved: rgba(120, 120, 120, .15);
           --hl-answered: rgba(80, 140, 255, .22); --hl-active: rgba(255, 140, 0, .55);
-          --ins: rgba(40, 180, 90, .32); --del: rgba(235, 60, 60, .30); --ins-fg: #18794a; --del-fg: #c6302b; }
+          --ins: rgba(40, 180, 90, .32); --del: rgba(235, 60, 60, .30); --ins-fg: #18794a; --del-fg: #c6302b;
+          --mv: rgba(90, 120, 210, .16); --mv-fg: #5470c0; }
   /* Dark mode only changes how the pages are shown: the page canvas is inverted with its hue
      turned back, and the raster images are laid over it from an unfiltered copy so photos keep
      their colors. The PDF and its source are never touched. */
@@ -21,7 +22,8 @@
           --reply: #24324a; --answered: #4f6f9f; --select: rgba(80, 140, 255, .4);
           --hl: rgba(255, 200, 0, .4); --hl-resolved: rgba(160, 160, 160, .18);
           --hl-answered: rgba(90, 150, 255, .35); --hl-active: rgba(255, 140, 0, .6);
-          --ins: rgba(60, 200, 110, .38); --del: rgba(255, 90, 90, .38); --ins-fg: #6ad99a; --del-fg: #ff8a80; }
+          --ins: rgba(60, 200, 110, .38); --del: rgba(255, 90, 90, .38); --ins-fg: #6ad99a; --del-fg: #ff8a80;
+          --mv: rgba(120, 150, 255, .22); --mv-fg: #93a8f0; }
   :root.dark .page > canvas { filter: invert(.9) hue-rotate(180deg); }
   .imgs { display: none; position: absolute; inset: 0; pointer-events: none; }
   :root.dark .imgs { display: block; }
@@ -148,6 +150,9 @@
   .chg i.ins { background: var(--ins); }
   .chg i.del { background: var(--del); }
   .chg i.dmark { width: 3px; margin-left: -2px; background: var(--del-fg); }
+  .chg i.mv { background: var(--mv); }
+  #histSum .key { margin-left: 6px; }
+  #histSum .key b { font-weight: normal; padding: 0 3px; border-radius: 2px; }
   .chg i.flash { outline: 2px solid #d97757; outline-offset: 1px; }
   /* the Chat tab */
   #chatMode { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1137,6 +1142,34 @@ function myers(a, b, limit = 4000) {
   }
   return [];
 }
+// Which words really changed. A small edit can move whole blocks of unchanged text: a paragraph
+// one line shorter pulls the rest of the column up, and text crosses a column or page break or a
+// figure, which changes the order in which the PDF's text reads. The diff then sees the block
+// removed in one place and added in another. Runs of at least six words removed in one place and
+// added unchanged in another count as moved, not changed. Returns 1 for each removed word of A
+// and each added word of B that is left.
+function changedWords(a, b, d) {
+  const aDel = new Uint8Array(a.length), bIns = new Uint8Array(b.length), K = 6, index = new Map();
+  for (const h of d.raw) { aDel.fill(1, h.a0, h.a1); bIns.fill(1, h.b0, h.b1); }
+  const run = (m, i) => { for (let t = 0; t < K; t++) if (!m[i + t]) return false; return true; };
+  for (let j = 0; j + K <= b.length; j++) {
+    if (!run(bIns, j)) continue;
+    const g = b.slice(j, j + K).join("\u0001");
+    if (!index.has(g)) index.set(g, []);
+    index.get(g).push(j);
+  }
+  for (let i = 0; i + K <= a.length;) {
+    const cands = run(aDel, i) ? index.get(a.slice(i, i + K).join("\u0001")) : null;
+    let best = 0, bj = -1;
+    for (const j of cands || []) {
+      let L = 0;
+      while (i + L < a.length && j + L < b.length && aDel[i + L] && bIns[j + L] && a[i + L] === b[j + L]) L++;
+      if (L > best) { best = L; bj = j; }
+    }
+    if (best >= K) { aDel.fill(0, i, i + best); bIns.fill(0, bj, bj + best); i += best; } else i++;
+  }
+  return { aDel, bIns };
+}
 // The longest chain of pairs increasing in both indices (pairs sorted by the first).
 function longestChain(c) {
   const tails = [], prev = new Int32Array(c.length);
@@ -1263,12 +1296,14 @@ async function docWords(d) {
 // builds under the same number.
 function histDoc(n) {
   const v = histVersions.find(x => x.n === n), rev = v ? v.rev : "", key = `${n}:${rev}`;
-  if (!histDocs.has(key)) {
+  if (histDocs.has(key)) {  // most recently used last, so the builds in use are the last evicted
+    const hit = histDocs.get(key); histDocs.delete(key); histDocs.set(key, hit);
+  } else {
     histDocs.set(key, (async () => {
       const d = await pdfjsLib.getDocument({ url: `/version/${n}.pdf?r=${rev}` }).promise;
       return { d, ...(await docWords(d)) };
     })());
-    for (const k of [...histDocs.keys()].slice(0, -4)) {  // keep a few builds in memory, and the two on show
+    for (const k of [...histDocs.keys()].slice(0, -6)) {  // keep a few builds in memory, and the two on show
       if (cmp && (k === `${cmp.a}:${cmp.aRev}` || k === `${cmp.b}:${cmp.bRev}`)) continue;
       histDocs.get(k).then(x => x.d.destroy()).catch(() => {});
       histDocs.delete(k);
@@ -1288,8 +1323,16 @@ async function histLoad(keep) {
   if (keep && histVersions.some(v => v.n === b0)) { histB.value = b0; histA.value = a0; }
   else if (vs.length) { histB.value = vs[0].n; histA.value = vs[1] ? vs[1].n : 0; }
 }
-function textOf(toks, i0, i1, max = 220) {
-  const t = toks.slice(i0, i1).map(t => t.w).join(" ");
+// The words of a change, leaving out any that only moved (shown as "…").
+function textOf(toks, i0, i1, mark, k, max = 220) {
+  const parts = [];
+  for (let i = i0; i < i1; i++) {
+    if (!mark || mark[i] === k || (i > i0 && i < i1 - 1 && mark[i - 1] === k && mark[i + 1] === k)) parts.push(toks[i].w);
+    else if (parts[parts.length - 1] !== "…") parts.push("…");
+  }
+  while (parts[0] === "…") parts.shift();
+  while (parts[parts.length - 1] === "…") parts.pop();
+  const t = parts.join(" ");
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
 // The build before n, or 0 for the first one kept.
@@ -1297,16 +1340,20 @@ const prevOf = n => { const i = histVersions.findIndex(v => v.n === n); return i
 // How much text a build changed: lines of the PDF that hold an added or removed word, and the
 // characters of those words. The viewer only sees the PDF, so these count rendered text, not source.
 function statsOf(A, B, d) {
-  const count = (toks, ranges) => {
+  const { aDel, bIns } = changedWords(A.toks.map(t => t.key), B.toks.map(t => t.key), d);
+  const count = (toks, m) => {
     const lines = new Set(); let chars = 0;
-    for (const [i0, i1] of ranges) for (let i = i0; i < i1; i++) {
+    m.forEach((on, i) => {
+      if (!on) return;
       chars += toks[i].w.length;
       for (const bx of toks[i].boxes) lines.add(bx.n + ":" + Math.round(bx.y * 400));
-    }
+    });
     return [lines.size, chars];
   };
-  const [ld, cd] = count(A.toks, d.raw.map(h => [h.a0, h.a1])), [la, ca] = count(B.toks, d.raw.map(h => [h.b0, h.b1]));
-  return { la, ld, ca, cd, changes: d.merged.length };
+  const [ld, cd] = count(A.toks, aDel), [la, ca] = count(B.toks, bIns);
+  const any = (m, i0, i1) => { for (let i = i0; i < i1; i++) if (m[i]) return true; return false; };
+  const changes = d.merged.filter(h => any(aDel, h.a0, h.a1) || any(bIns, h.b0, h.b1)).length;
+  return { la, ld, ca, cd, changes, moves: 1 };
 }
 async function saveStats(n, st) {
   const v = histVersions.find(v => v.n === n);
@@ -1323,9 +1370,9 @@ async function fillStats() {
     for (const v of histVersions.slice().reverse()) {
       const p = prevOf(v.n);
       if (!histOpen) break;
-      if (v.stats || !p) continue;
+      if ((v.stats && v.stats.moves) || !p) continue;  // counts from before moves were matched are redone
       const [A, B] = await Promise.all([histDoc(p), histDoc(v.n)]);
-      if (!v.stats) await saveStats(v.n, statsOf(A, B, wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
+      if (!(v.stats && v.stats.moves)) await saveStats(v.n, statsOf(A, B, wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
       histRenderList();
     }
   } catch (e) { console.error(e); } finally { statsRunning = false; }
@@ -1345,15 +1392,26 @@ async function histShow() {
   const [B, A] = await Promise.all([histDoc(b), a ? histDoc(a) : null]);
   if (tok !== histToken) return;
   // Which tokens changed, and which change (merged hunk) each belongs to.
-  const raw = A ? wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key)) : { raw: [], merged: [] };
-  const aMark = new Int32Array(A ? A.toks.length : 0).fill(-1), bMark = new Int32Array(B.toks.length).fill(-1);
-  const hunks = raw.merged;
-  let hi = 0;
+  const aKeys = A ? A.toks.map(t => t.key) : [], bKeys = B.toks.map(t => t.key);
+  const raw = A ? wordDiff(aKeys, bKeys) : { raw: [], merged: [] };
+  const moved = A ? changedWords(aKeys, bKeys, raw) : { aDel: [], bIns: [] };
+  // Words the diff saw removed and added elsewhere, unchanged: they only moved.
+  const aMv = new Uint8Array(aKeys.length), bMv = new Uint8Array(bKeys.length);
   for (const h of raw.raw) {
-    while (hi < hunks.length && hunks[hi].a1 < h.a1) hi++;
-    for (let i = h.a0; i < h.a1; i++) aMark[i] = hi;
-    for (let j = h.b0; j < h.b1; j++) bMark[j] = hi;
+    for (let i = h.a0; i < h.a1; i++) if (!moved.aDel[i]) aMv[i] = 1;
+    for (let j = h.b0; j < h.b1; j++) if (!moved.bIns[j]) bMv[j] = 1;
   }
+  let aMark = new Int32Array(A ? A.toks.length : 0).fill(-1), bMark = new Int32Array(B.toks.length).fill(-1);
+  let hi = 0;
+  for (const h of raw.raw) {  // only words that changed, not those that moved
+    while (hi < raw.merged.length && raw.merged[hi].a1 < h.a1) hi++;
+    for (let i = h.a0; i < h.a1; i++) if (moved.aDel[i]) aMark[i] = hi;
+    for (let j = h.b0; j < h.b1; j++) if (moved.bIns[j]) bMark[j] = hi;
+  }
+  // Changes left with no changed words were moves; drop them and number the rest again.
+  const used = new Set([...aMark, ...bMark].filter(m => m >= 0)), renum = new Map();
+  const hunks = raw.merged.filter((h, k) => used.has(k) && renum.set(k, renum.size));
+  aMark = aMark.map(m => m >= 0 ? renum.get(m) : -1); bMark = bMark.map(m => m >= 0 ? renum.get(m) : -1);
   // Where each change sits: its first changed word in the newer build, or for a pure removal the
   // word that now follows it, which is where the red mark goes.
   hunks.forEach((h, k) => {
@@ -1364,16 +1422,23 @@ async function histShow() {
     let i = h.a0; while (i < h.a1 && aMark[i] !== k) i++;
     h.del = i < h.a1;
     h.aAnchor = h.del ? A.toks[i].boxes[0] : null;
-    h.old = A ? textOf(A.toks, h.a0, h.a1) : ""; h.new = textOf(B.toks, h.b0, h.b1);
+    h.old = A ? textOf(A.toks, h.a0, h.a1, aMark, k) : ""; h.new = textOf(B.toks, h.b0, h.b1, bMark, k);
   });
-  cmp = { a, b, A, B, aMark, bMark, hunks, aRev: revOf(a), bRev: revOf(b) };
-  let plus = 0, minus = 0;
+  cmp = { a, b, A, B, aMark, bMark, aMv, bMv, hunks, aRev: revOf(a), bRev: revOf(b) };
+  let plus = 0, minus = 0, mv = 0;
   for (const m of bMark) if (m >= 0) plus++;
   for (const m of aMark) if (m >= 0) minus++;
-  document.getElementById("histSum").textContent = A
-    ? `${hunks.length} change${hunks.length === 1 ? "" : "s"}, +${plus} −${minus} words` : "";
+  for (const m of bMv) mv += m;
+  const sum = document.getElementById("histSum");
+  sum.textContent = A ? `${hunks.length} change${hunks.length === 1 ? "" : "s"}, +${plus} −${minus} words` + (mv ? `, ${mv} moved` : "") : "";
+  if (A) {
+    const key = document.createElement("span"); key.className = "key";
+    key.innerHTML = '<b style="background:var(--ins)">added</b> <b style="background:var(--del)">removed</b> <b style="background:var(--mv)">moved</b>';
+    sum.append(key);
+  }
   const v = histVersions.find(v => v.n === b);
   if (A && a === prevOf(b) && v && !v.stats) saveStats(b, statsOf(A, B, raw));
+  else if (A && a === prevOf(b) && v && v.stats && !v.stats.moves) saveStats(b, statsOf(A, B, raw));  // counted before moves were matched
   histLayout();
   histRenderList();
 }
@@ -1400,7 +1465,7 @@ function histPage(side, n, width) {
 function changeAt(x, y, scope) {
   const div = scope && scope.closest(".hpage");
   if (!div) return null;
-  for (const e of div.querySelectorAll(".chg i")) {
+  for (const e of div.querySelectorAll(".chg i[data-h]")) {
     const r = e.getBoundingClientRect();
     if (x >= r.left - 2 && x <= r.right + 2 && y >= r.top && y <= r.bottom) return e;
   }
@@ -1523,14 +1588,16 @@ async function histRender(div, tok) {
   if (!cmp.A) return;
   const layer = document.createElement("div"); layer.className = "chg";
   const put = (cls, bx, k) => {
-    const e = document.createElement("i"); e.className = cls; e.dataset.h = k;
+    const e = document.createElement("i"); e.className = cls;
+    if (k !== null) e.dataset.h = k;  // moved text has no change to show
     e.style.left = bx.x * 100 + "%"; e.style.top = bx.y * 100 + "%"; e.style.height = bx.h * 100 + "%";
     if (cls !== "dmark") e.style.width = bx.w * 100 + "%";
     layer.append(e);
   };
-  const mark = side === "A" ? cmp.aMark : cmp.bMark;
+  const mark = side === "A" ? cmp.aMark : cmp.bMark, mv = side === "A" ? cmp.aMv : cmp.bMv;
   src.toks.forEach((t, i) => {
     if (mark[i] >= 0) for (const bx of t.boxes) if (bx.n === n) put(side === "A" ? "del" : "ins", bx, mark[i]);
+    else if (mv[i]) for (const bx of t.boxes) if (bx.n === n) put("mv", bx, null);
   });
   if (side === "B" && histMode === "single")  // where words were removed
     cmp.hunks.forEach((h, k) => { if (h.del && h.anchor && h.anchor.n === n) put("dmark", h.anchor, k); });
