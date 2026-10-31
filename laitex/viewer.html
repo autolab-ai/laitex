@@ -12,7 +12,7 @@
           --hl: rgba(255, 210, 0, .38); --hl-resolved: rgba(120, 120, 120, .15);
           --hl-answered: rgba(80, 140, 255, .22); --hl-active: rgba(255, 140, 0, .55);
           --ins: rgba(40, 180, 90, .32); --del: rgba(235, 60, 60, .30); --ins-fg: #18794a; --del-fg: #c6302b;
-          --mv: rgba(90, 120, 210, .16); --mv-fg: #5470c0; }
+          --mv: rgba(70, 110, 230, .24); --mv-fg: #5470c0; }
   /* Dark mode only changes how the pages are shown: the page canvas is inverted with its hue
      turned back, and the raster images are laid over it from an unfiltered copy so photos keep
      their colors. The PDF and its source are never touched. */
@@ -23,7 +23,7 @@
           --hl: rgba(255, 200, 0, .4); --hl-resolved: rgba(160, 160, 160, .18);
           --hl-answered: rgba(90, 150, 255, .35); --hl-active: rgba(255, 140, 0, .6);
           --ins: rgba(60, 200, 110, .38); --del: rgba(255, 90, 90, .38); --ins-fg: #6ad99a; --del-fg: #ff8a80;
-          --mv: rgba(120, 150, 255, .22); --mv-fg: #93a8f0; }
+          --mv: rgba(120, 150, 255, .30); --mv-fg: #93a8f0; }
   :root.dark .page > canvas { filter: invert(.9) hue-rotate(180deg); }
   .imgs { display: none; position: absolute; inset: 0; pointer-events: none; }
   :root.dark .imgs { display: block; }
@@ -246,6 +246,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
       <div class="row">
         <span class="seg"><button id="histSingle" title="The newer build, with added words in green and removals marked in red">changes</button><button id="histSide" title="Both builds side by side">side by side</button></span>
         <label><input type="checkbox" id="histOnly"> changed pages only</label>
+        <label title="Text that only moved, for example when a paragraph got shorter, in blue (m)"><input type="checkbox" id="histMovedBox" checked> show moved text</label>
       </div>
       <div class="row" id="histSum"></div>
     </div>
@@ -295,6 +296,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>&rarr;</kbd> <kbd>&larr;</kbd> or <kbd>n</kbd> <kbd>p</kbd></td><td>next, previous change</td></tr>
           <tr><td><kbd>s</kbd></td><td>side by side, or changes on one page</td></tr>
           <tr><td><kbd>o</kbd></td><td>changed pages only</td></tr>
+          <tr><td><kbd>m</kbd></td><td>show moved text, in blue</td></tr>
           <tr><td><kbd>b</kbd></td><td>roll back to the selected version</td></tr>
           <tr><td>select text</td><td>comment on that version</td></tr>
           <tr><td>drag the gray, or <kbd>Alt</kbd>+drag</td><td>move the pages around</td></tr>
@@ -1231,6 +1233,9 @@ function wordDiff(a, b) {
 
 const hist = document.getElementById("hist"), histPages = document.getElementById("histPages");
 const histList = document.getElementById("histList"), histA = document.getElementById("histA"), histB = document.getElementById("histB");
+let histMoved = true;  // draw text that only moved
+try { histMoved = localStorage.getItem("histMoved") !== "0"; } catch (e) {}
+document.getElementById("histMovedBox").checked = histMoved;
 let histOpen = false, histMode = "side", histOnly = false, histVersions = [], histToken = 0, histObs = null, cmp = null;
 try { histMode = localStorage.getItem("histView") || "side"; histOnly = localStorage.getItem("histOnly") === "1"; } catch (e) {}
 document.getElementById("histOnly").checked = histOnly;
@@ -1445,7 +1450,8 @@ async function histShow() {
 // Pages with a change, per side.
 function changedPages(side) {
   const set = new Set(), toks = cmp[side].toks, mark = side === "A" ? cmp.aMark : cmp.bMark;
-  mark.forEach((m, i) => { if (m >= 0) for (const bx of toks[i].boxes) set.add(bx.n); });
+  const mv = side === "A" ? cmp.aMv : cmp.bMv;
+  mark.forEach((m, i) => { if (m >= 0 || (histMoved && mv[i])) for (const bx of toks[i].boxes) set.add(bx.n); });
   if (side === "B") for (const h of cmp.hunks) if (h.del && !h.ins && h.anchor) set.add(h.anchor.n);
   return set;
 }
@@ -1596,8 +1602,9 @@ async function histRender(div, tok) {
   };
   const mark = side === "A" ? cmp.aMark : cmp.bMark, mv = side === "A" ? cmp.aMv : cmp.bMv;
   src.toks.forEach((t, i) => {
-    if (mark[i] >= 0) for (const bx of t.boxes) if (bx.n === n) put(side === "A" ? "del" : "ins", bx, mark[i]);
-    else if (mv[i]) for (const bx of t.boxes) if (bx.n === n) put("mv", bx, null);
+    const cls = mark[i] >= 0 ? (side === "A" ? "del" : "ins") : (mv[i] && histMoved ? "mv" : null);
+    if (!cls) return;
+    for (const bx of t.boxes) if (bx.n === n) put(cls, bx, mark[i] >= 0 ? mark[i] : null);
   });
   if (side === "B" && histMode === "single")  // where words were removed
     cmp.hunks.forEach((h, k) => { if (h.del && h.anchor && h.anchor.n === n) put("dmark", h.anchor, k); });
@@ -1731,6 +1738,11 @@ async function setHist(open) {
 histA.onchange = histB.onchange = () => histShow();
 document.getElementById("histSingle").onclick = () => { histMode = "single"; try { localStorage.setItem("histView", histMode); } catch (e) {} histShow(); };
 document.getElementById("histSide").onclick = () => { histMode = "side"; try { localStorage.setItem("histView", histMode); } catch (e) {} histShow(); };
+document.getElementById("histMovedBox").onchange = e => {
+  histMoved = e.target.checked;
+  try { localStorage.setItem("histMoved", histMoved ? "1" : "0"); } catch (err) {}
+  if (cmp) histLayout();
+};
 document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
 histPages.addEventListener("scroll", () => { tip.style.display = "none"; });
 window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setTab("review"); });
@@ -1935,6 +1947,7 @@ window.addEventListener("keydown", e => {
     ArrowRight: () => stepChange(1), ArrowLeft: () => stepChange(-1), n: () => stepChange(1), p: () => stepChange(-1),
     s: () => document.getElementById(histMode === "side" ? "histSingle" : "histSide").click(),
     o: () => document.getElementById("histOnly").click(),
+    m: () => document.getElementById("histMovedBox").click(),
     b: () => { const btn = histList.querySelector(".ver.on .rb"); if (btn) btn.click(); },
   });
   const f = keys[key === " " ? " " : key];
