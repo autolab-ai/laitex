@@ -366,6 +366,11 @@ class Versions:
                 items[-1] = item  # the version in progress gets the newer build
             else:
                 items.append(item)
+            if len(items) > self.KEEP:
+                # the dropped versions still count: the first kept one remembers where the names
+                # stood before it, so pruning never renames the versions that remain
+                before = self.names(items)[items[-self.KEEP - 1]["n"]]
+                items[-self.KEEP]["base"] = [int(x) for x in before[1:].split(".")]
             for old in items[:-self.KEEP]:
                 with contextlib.suppress(OSError):
                     os.remove(self.path(old["n"]))
@@ -420,9 +425,12 @@ class Versions:
 
     def names(self, items=None):
         """Display names: v0.1, v0.2, ... until a version is committed to git, which becomes
-        v1.0; then v1.1, v1.2, ... until the next commit (v2.0), and so on."""
-        major, minor, out = 0, 0, {}
-        for i in items if items is not None else self.list():
+        v1.0; then v1.1, v1.2, ... until the next commit (v2.0), and so on. Counting starts from
+        the "base" of the first version, which the versions pruned before it left behind."""
+        items = self.list() if items is None else items
+        major, minor = items[0].get("base", (0, 0)) if items else (0, 0)
+        out = {}
+        for i in items:
             if i.get("release"):
                 major, minor = major + 1, 0
             else:
