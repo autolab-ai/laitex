@@ -541,7 +541,7 @@ def thread_of(c):
 
 def public(c):
     """A comment without the highlight geometry, which agents do not need."""
-    return {k: v for k, v in c.items() if k != "rects"}
+    return {k: v for k, v in c.items() if k not in ("rects", "more")}
 
 
 # ---- HTTP server ------------------------------------------------------------
@@ -683,6 +683,10 @@ def make_handler(st, agent_name, versions):
                 "status": "open",
                 "reply": "",
             }
+            if isinstance(data.get("more"), list) and data["more"]:  # a selection that runs onto later pages
+                item["more"] = [{"page": int(m["page"]), "rects": m["rects"]} for m in data["more"]
+                                if isinstance(m, dict) and "page" in m and isinstance(m.get("rects"), list)]
+                item["to_page"] = item["more"][-1]["page"] if item["more"] else item["page"]
             if isinstance(data.get("version"), str) and data.get("vn"):  # about an older version
                 item["version"], item["vn"] = data["version"][:20], int(data["vn"])
             with st.lock():

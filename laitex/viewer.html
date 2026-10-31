@@ -710,7 +710,7 @@ function commonEnd(a, b) { let n = 0; while (n < a.length && n < b.length && a[a
 function commonStart(a, b) { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; }
 let reanchoring = false;
 async function reanchor(d) {
-  const todo = comments.filter(c => c.status !== "resolved" && c.quote && !c.vn);  // not those on older versions
+  const todo = comments.filter(c => c.status !== "resolved" && c.quote && !c.vn && !c.more);  // not on older versions or across pages
   if (reanchoring || !todo.length) return;
   reanchoring = true;
   try {
@@ -771,8 +771,10 @@ function drawHighlights() {
     // Resolved text has usually been rewritten, so its old boxes are only drawn when selected.
     if (c.status === "resolved" && c.id !== activeId) continue;
     if (c.vn) continue;  // about an older version: drawn on its History pages
-    const hl = pagesEl.querySelector(`.page[data-page="${c.page}"] .hl`);
-    if (hl) drawRects(hl, c);
+    for (const part of [{ page: c.page, rects: c.rects }, ...(c.more || [])]) {
+      const hl = pagesEl.querySelector(`.page[data-page="${part.page}"] .hl`);
+      if (hl) drawRects(hl, { ...c, rects: part.rects });
+    }
   }
   if (!histOpen || !cmp) return;
   const latest = histVersions.length ? histVersions[histVersions.length - 1].n : 0;
@@ -780,9 +782,10 @@ function drawHighlights() {
     const hl = div.querySelector(".hl"), vn = div.dataset.side === "A" ? cmp.a : cmp.b;
     hl.replaceChildren();
     for (const c of all) {
-      if ((c.vn || latest) !== vn || c.page !== +div.dataset.page) continue;
+      if ((c.vn || latest) !== vn) continue;
       if (c.status === "resolved" && c.id !== activeId) continue;
-      drawRects(hl, c);
+      for (const part of [{ page: c.page, rects: c.rects }, ...(c.more || [])])
+        if (part.page === +div.dataset.page) drawRects(hl, { ...c, rects: part.rects });
     }
   });
 }
@@ -925,21 +928,39 @@ document.addEventListener("mouseup", ev => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) return;
     const range = sel.getRangeAt(0);
-    const node = range.commonAncestorContainer;
-    const pageEl = (node.nodeType === 1 ? node : node.parentElement).closest(".page");
-    if (!pageEl) return;
-    const pr = pageEl.getBoundingClientRect();
-    const rects = [...range.getClientRects()].filter(r => r.width > 1 && r.height > 1)
-      .map(r => [(r.left - pr.left) / pr.width, (r.top - pr.top) / pr.height, r.width / pr.width, r.height / pr.height]);
-    if (!rects.length) return;
+    const pageOf = n => (n.nodeType === 1 ? n : n.parentElement).closest(".page");
+    const pageEl = pageOf(range.startContainer), endEl = pageOf(range.endContainer);
+    if (!pageEl || !endEl) return;
+    // A selection can run across pages: the comment starts on the first one, and its boxes are
+    // kept per page, so the highlight is drawn on each page it covers. On History pages it
+    // stays on one side of the comparison.
+    let pageEls = [pageEl];
+    if (endEl !== pageEl) {
+      const all = [...pageEl.closest("#pages, #histPages").querySelectorAll(".page")]
+        .filter(p => p.dataset.side === pageEl.dataset.side);
+      const i = all.indexOf(pageEl), j = all.indexOf(endEl);
+      if (i >= 0 && j > i) pageEls = all.slice(i, j + 1);
+    }
+    const boxes = [...range.getClientRects()].filter(r => r.width > 1 && r.height > 1);
+    const per = pageEls.map(el => {
+      const pr = el.getBoundingClientRect();
+      const mine = boxes.filter(r => {
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        return cx >= pr.left && cx <= pr.right && cy >= pr.top && cy <= pr.bottom;
+      });
+      return { page: +el.dataset.page, rects: mine.map(r => [(r.left - pr.left) / pr.width, (r.top - pr.top) / pr.height, r.width / pr.width, r.height / pr.height]) };
+    }).filter(x => x.rects.length);
+    if (!per.length) return;
     const quote = sel.toString().replace(/\s+/g, " ").trim();
-    pending = { page: +pageEl.dataset.page, quote, context: contextOf(pageEl, quote, range), rects };
+    pending = { page: per[0].page, quote, context: contextOf(pageEl, quote, range), rects: per[0].rects };
+    if (per.length > 1) pending.more = per.slice(1);
     // On a History page of an older version, the comment is about that version.
     if (pageEl.classList.contains("hpage") && cmp) {
       const vn = pageEl.dataset.side === "A" ? cmp.a : cmp.b, latest = histVersions[histVersions.length - 1];
       if (latest && vn !== latest.n) Object.assign(pending, { vn, version: nameOf(vn) });
     }
-    openPop(range.getBoundingClientRect());
+    // Next to the end of the selection; across pages the whole range can be taller than the view.
+    openPop(per.length > 1 ? boxes[boxes.length - 1] : range.getBoundingClientRect());
   }, 0);
 });
 function closePop() { pop.style.display = "none"; pending = null; drawHighlights(); }
