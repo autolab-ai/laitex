@@ -475,23 +475,42 @@ async function previewText(d, t) {
   }
   // Baselines within a line differ slightly (labels, superscripts), so order each line by x.
   for (const l of lines) l.items.sort((a, b) => a.transform[4] - b.transform[4]);
-  // Keep only the destination's column: on each line, start at the first item right of the
-  // target's left edge and follow the items while they touch. The gap to the next column,
-  // or to the line numbers in the margin, ends the run.
+  // Keep only the destination's column. Each line splits into runs of touching items; the gap
+  // to the next column, or to the line numbers in the margin, ends a run. The runs of one
+  // column overlap across lines (an indented equation, a bibliography label and its hanging
+  // lines), while a gutter separates them from the other column and the margins, so the
+  // column is the stretch of overlapping runs that holds the target's left edge. Lines with
+  // nothing in it (the space above a heading, say) drop out, instead of showing the other
+  // column at that height.
   if (t.x != null) {
-    for (const l of lines) {
-      const row = l.items.filter(it => it.transform[4] >= t.x - 3);
-      const run = [];
-      let solidEnd = null;  // right end of the last item with visible text
-      for (const it of row) {
-        const prev = run[run.length - 1];
-        if (prev && it.transform[4] - (prev.transform[4] + prev.width) > 8) break;
+    const runsOf = l => {
+      const runs = [];
+      let run = null, solidEnd = null;  // right end of the last item with visible text
+      for (const it of l.items) {
+        const prev = run && run.items[run.items.length - 1];
         // A trailing space can be stretched up to the margin; a number far past the text is a line number.
-        if (solidEnd !== null && /^\s*\d+\s*$/.test(it.str) && it.transform[4] - solidEnd > 8) break;
-        run.push(it);
-        if (it.str.trim()) solidEnd = it.transform[4] + it.width;
+        if (!prev || it.transform[4] - (prev.transform[4] + prev.width) > 8 ||
+            (solidEnd !== null && /^\s*\d+\s*$/.test(it.str) && it.transform[4] - solidEnd > 8)) {
+          run = { items: [], x0: it.transform[4], x1: it.transform[4] }; runs.push(run); solidEnd = null;
+        }
+        run.items.push(it);
+        if (it.str.trim()) { solidEnd = it.transform[4] + it.width; run.x1 = solidEnd; }
       }
-      l.items = run;
+      return runs;
+    };
+    const rows = lines.map(runsOf);
+    const spans = [];
+    for (const r of rows.flat().sort((a, b) => a.x0 - b.x0)) {
+      const s = spans[spans.length - 1];
+      if (s && r.x0 < s.x1) s.x1 = Math.max(s.x1, r.x1); else spans.push({ x0: r.x0, x1: r.x1 });
+    }
+    const col = spans.find(s => s.x0 - 3 <= t.x && t.x < s.x1);
+    for (const [i, l] of lines.entries()) {
+      if (col) l.items = rows[i].filter(r => r.x0 >= col.x0 && r.x0 < col.x1).flatMap(r => r.items);
+      else {
+        const r = rows[i].find(r => r.x0 >= t.x - 3);
+        l.items = r ? r.items : [];
+      }
     }
     lines = lines.filter(l => l.items.length);
   }
@@ -501,9 +520,11 @@ async function previewText(d, t) {
     const prev = l.items[i - 1];  // a visible gap between items is a space the PDF does not spell out
     return prev && it.transform[4] - (prev.transform[4] + prev.width) > 1 ? " " + it.str : it.str;
   }).join("");
-  // A bibliography entry: start at its label and stop before the next one.
+  // A bibliography entry: start at its label and stop before the next one. The label is on
+  // the first line, or the second when the line above the entry is in reach; further down, a
+  // line starting with a citation is running text, not an entry.
   const label = /^\s*\[[^\]]{1,12}\]/, first = lines.findIndex(l => label.test(text(l)));
-  if (first >= 0) {
+  if (first >= 0 && first <= 1) {
     const next = lines.findIndex((l, i) => i > first && label.test(text(l)));
     lines = lines.slice(first, next < 0 ? undefined : next);
   } else lines = lines.filter(l => l.y > y0 - 46);
