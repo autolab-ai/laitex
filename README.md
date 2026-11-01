@@ -115,7 +115,8 @@ The viewer also:
 
 - reloads the PDF when the file changes and keeps your scroll position and zoom. The tabs share
   one zoom and one reading position, across and down the page, so the History tab opens where
-  you were reading and switching back returns to where you left the history;
+  you were reading and switching back returns to where you left the history. Reloading the page
+  keeps both, per PDF, in this browser;
 - makes citations and section, figure and equation references clickable, with a preview of
   the target on hover;
 - jumps to a comment when you click it in the sidebar, where you can also edit, resolve,

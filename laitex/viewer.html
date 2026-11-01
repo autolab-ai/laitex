@@ -412,6 +412,18 @@ function viewTo(sc, pages, v) {
 }
 function anchor() { return viewOf(main, pagesEl.children) || { n: 1, fy: 0, fx: 0 }; }
 function restore(a) { viewTo(main, pagesEl.children, a); }
+// The reading position also survives reloading the page: it is kept in this browser, per PDF,
+// as the zoom is.
+let viewKey = null, saveTimer;
+function savedView() {
+  try { const v = JSON.parse(localStorage.getItem(viewKey)); return v && v.n > 0 ? v : null; } catch (e) { return null; }
+}
+function saveView() {
+  const v = histOpen ? viewOf(histPages, histAnchors()) || view : doc ? anchor() : null;
+  if (v && viewKey) try { localStorage.setItem(viewKey, JSON.stringify(v)); } catch (e) {}
+}
+function saveSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(saveView, 300); }
+window.addEventListener("pagehide", saveView);
 
 // Resize page boxes to the current zoom. The old canvas is stretched until it is
 // re-rendered, and the text layer follows the --scale-factor variable, so this is instant.
@@ -690,7 +702,7 @@ async function loadDoc() {
   if (loading) return;
   loading = true;
   try {
-    const a = anchor();
+    const a = doc ? anchor() : savedView() || anchor();  // the first load: where the last visit left off
     const d = await pdfjsLib.getDocument({ url: "/pdf?t=" + Date.now() }).promise;
     const sz = [];
     for (let n = 1; n <= d.numPages; n++) {
@@ -741,7 +753,10 @@ function setZoom(z) {
   clearTimeout(zoomTimer); zoomTimer = setTimeout(renderVisible, 150);
 }
 let scrollTimer;
-main.addEventListener("scroll", () => { hideTip(); clearTimeout(scrollTimer); scrollTimer = setTimeout(renderVisible, 80); });
+main.addEventListener("scroll", () => {
+  hideTip(); clearTimeout(scrollTimer); scrollTimer = setTimeout(renderVisible, 80);
+  if (!histOpen) saveSoon();
+});
 
 // ---- keep highlights on their text when the PDF is rebuilt ----
 // A rebuild moves text around, so a comment's stored boxes can end up over other words.
@@ -1131,6 +1146,7 @@ async function poll() {
       document.title = st.name; document.getElementById("docname").textContent = st.name;
       document.getElementById("docname").title = st.pdf;
     }
+    if (st.pdf) viewKey = "view:" + st.pdf;
     agentName = st.agent_name || "the agent";
     document.querySelectorAll(".an").forEach(s => s.textContent = agentName);
     if (histOpen && JSON.stringify(st.request) !== JSON.stringify(request_)) { request_ = st.request; histRenderList(); }
@@ -1885,7 +1901,7 @@ document.getElementById("histMovedBox").onchange = e => {
   if (cmp) histLayout();
 };
 document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
-histPages.addEventListener("scroll", () => { tip.style.display = "none"; });
+histPages.addEventListener("scroll", () => { tip.style.display = "none"; saveSoon(); });
 window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setTab("review"); });
 
 // ---- chat with the agent ----
