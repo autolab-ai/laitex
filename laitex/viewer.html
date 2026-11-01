@@ -139,7 +139,7 @@
   #hist { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); z-index: 6;
           display: none; background: var(--bg); }
   #hist.open { display: block; }
-  #histPages { position: absolute; inset: 0; overflow: auto; padding: 16px 20px 40vh; }
+  #histPages { position: absolute; inset: 0; overflow: auto; padding: 16px 20px 60vh; }
   #histPages > .note { color: var(--muted); padding: 20px; }
   #histCtl { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 8px;
              padding: 2px 0 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
@@ -380,18 +380,38 @@ try { zoom = parseFloat(localStorage.getItem("zoom")) || 1; } catch (e) {}
 function fitWidth() { return Math.max(500, Math.min((main.clientWidth || window.innerWidth - 340) - 40, 1100)); }
 function scaleFor(n) { return fitWidth() * zoom / sizes[n - 1].w; }
 
-function anchor() {
-  const pages = pagesEl.children, top = main.scrollTop;
-  for (let i = 0; i < pages.length; i++) {
-    const p = pages[i];
-    if (p.offsetTop + p.offsetHeight > top) return { i, f: (top - p.offsetTop) / p.offsetHeight };
+// A place in the document: the page at the top of the view, and how far down and across that
+// page the view's top-left corner is, as fractions of the page. The page view (Review, Chat,
+// Log) and the History tab scroll separately, so switching between them, or zooming, puts the
+// same place back with this. A view not scrolled since it was put somewhere still stands for
+// that place, even where its pages could not scroll all the way there (side by side, say), and
+// so does each direction it was not scrolled in.
+function viewOf(sc, pages) {
+  const put = sc._put, box = sc.getBoundingClientRect();
+  if (put && put.top === sc.scrollTop && put.left === sc.scrollLeft) return put.v;
+  for (const p of pages) {
+    const r = p.getBoundingClientRect();
+    if (r.bottom <= box.top) continue;
+    const v = { n: +p.dataset.page, fy: (box.top - r.top) / r.height, fx: (box.left - r.left) / r.width };
+    if (put && put.top === sc.scrollTop) { v.n = put.v.n; v.fy = put.v.fy; }
+    if (put && put.left === sc.scrollLeft) v.fx = put.v.fx;
+    return v;
   }
-  return { i: 0, f: 0 };
+  return null;
 }
-function restore(a) {
-  const p = pagesEl.children[a.i];
-  if (p) main.scrollTop = p.offsetTop + a.f * p.offsetHeight;
+function viewTo(sc, pages, v) {
+  if (!v) return;
+  pages = [...pages];
+  const p = pages.find(p => +p.dataset.page >= v.n) || pages[pages.length - 1];  // a page left out: the next one
+  if (!p) return;
+  const box = sc.getBoundingClientRect(), r = p.getBoundingClientRect();
+  if (p === pages[0] && v.fy <= 0) sc.scrollTop = 0;  // the top, with whatever is above the first page
+  else sc.scrollTop += r.top + (+p.dataset.page === v.n ? v.fy : 0) * r.height - box.top;
+  sc.scrollLeft += r.left + v.fx * r.width - box.left;
+  sc._put = { top: sc.scrollTop, left: sc.scrollLeft, v };
 }
+function anchor() { return viewOf(main, pagesEl.children) || { n: 1, fy: 0, fx: 0 }; }
+function restore(a) { viewTo(main, pagesEl.children, a); }
 
 // Resize page boxes to the current zoom. The old canvas is stretched until it is
 // re-rendered, and the text layer follows the --scale-factor variable, so this is instant.
@@ -681,7 +701,7 @@ async function loadDoc() {
     doc = d; sizes = sz;
     const fresh = [];
     for (let n = 1; n <= d.numPages; n++) fresh.push(makePage(n));
-    const focus = [a.i, a.i + 1, a.i - 1].filter(i => i >= 0 && i < fresh.length);
+    const focus = [a.n - 1, a.n, a.n - 2].filter(i => i >= 0 && i < fresh.length);
     const holder = document.createElement("div");
     holder.style.cssText = "position:absolute;left:-99999px;top:0";
     document.body.appendChild(holder);
@@ -1490,6 +1510,7 @@ async function fillStats() {
 async function histShow() {
   const tok = ++histToken, b = +histB.value, a = +histA.value;
   if (histObs) histObs.disconnect();
+  histKeep();
   histPages.replaceChildren(); cmp = null;
   histRenderList();
   document.getElementById("histSingle").classList.toggle("on", histMode === "single");
@@ -1625,19 +1646,27 @@ function histObserve(tok) {
   }), { root: histPages, rootMargin: "1200px 0px" });
   histPages.querySelectorAll(".hpage").forEach(d => histObs.observe(d));
 }
+// The page of each row that the reading position follows: the build on show, or the older build
+// in a side-by-side row where the newer one has no such page.
+function histAnchors() {
+  return [...histPages.children].map(r => r.classList.contains("hrow") ? r.querySelector('.hpage[data-side="B"]') || r.querySelector(".hpage") : r)
+    .filter(p => p && p.classList.contains("hpage"));
+}
+// The place on show (see viewOf): the page view hands it to the history when the tab opens, the
+// history keeps it across builds and layouts, and hands it back when the tab closes.
+let view = null;
+function histKeep() { const v = viewOf(histPages, histAnchors()); if (v) view = v; }
 // Zooming stretches the pages at once, keeping the view on the same spot, and renders them
 // again at the new size once the zoom settles, as the main view does.
 let histZoomTimer;
 function histZoom() {
-  const pages = [...histPages.querySelectorAll(".hpage")];
-  const at = pages.find(p => p.offsetTop + p.offsetHeight > histPages.scrollTop);
-  const f = at ? (histPages.scrollTop - at.offsetTop) / at.offsetHeight : 0;
+  const pages = [...histPages.querySelectorAll(".hpage")], v = viewOf(histPages, histAnchors());
   for (const p of pages) {
     const w = +p.dataset.w1 * zoom;
     p.style.width = w + "px"; p.style.height = w * +p.dataset.r + "px";
     p.style.setProperty("--scale-factor", w / +p.dataset.pw);
   }
-  if (at) histPages.scrollTop = at.offsetTop + f * at.offsetHeight;
+  viewTo(histPages, histAnchors(), v);
   clearTimeout(histZoomTimer);
   histZoomTimer = setTimeout(() => histObserve(++histToken), 200);
 }
@@ -1648,6 +1677,7 @@ histPages.addEventListener("wheel", e => {  // pinch on a trackpad arrives as ct
 }, { passive: false });
 function histLayout() {
   const tok = histToken;
+  histKeep();
   const avail = histPages.clientWidth - 40, rows = [];
   if (histMode === "side" && cmp.A) {
     const w = Math.min((avail - 16) / 2, 1100) * zoom, ca = changedPages("A"), cb = changedPages("B");
@@ -1665,8 +1695,8 @@ function histLayout() {
       }
       rows.push(row);
     }
-  } else {
-    const w = Math.min(avail, 1100) * zoom, cb = changedPages("B");
+  } else {  // the pages at the size of the page view, so switching tabs does not move them
+    const w = fitWidth() * zoom, cb = changedPages("B");
     for (let p = 1; p <= cmp.B.sizes.length; p++) if (!histOnly || !cmp.A || cb.has(p)) rows.push(histPage("B", p, w));
   }
   if (!rows.length) {
@@ -1674,6 +1704,7 @@ function histLayout() {
     note.textContent = "No text changed between these builds."; rows.push(note);
   }
   histPages.replaceChildren(...rows);
+  viewTo(histPages, histAnchors(), view);
   histObserve(tok);
 }
 async function histRender(div, tok) {
@@ -1818,10 +1849,15 @@ function histFocus(k, scroll) {
 let histPoll = null;
 async function setHist(open) {
   if (open === histOpen) return;
+  if (open) view = anchor(); else histKeep();
   histOpen = open;
   hist.classList.toggle("open", open);
   clearInterval(histPoll);
-  if (!open) { histToken++; if (histObs) histObs.disconnect(); histPages.replaceChildren(); cmp = null; tip.style.display = "none"; return; }
+  if (!open) {
+    histToken++; if (histObs) histObs.disconnect(); histPages.replaceChildren(); cmp = null; tip.style.display = "none";
+    restore(view);
+    return;
+  }
   await histLoad(true);  // coming back to the tab keeps the builds that were picked
   histShow();
   fillStats();
@@ -1976,7 +2012,7 @@ async function sendChat() {
   const text = chatInput.value.trim();
   if (!text) return;
   chatInput.value = "";
-  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page: anchor().i + 1 }) });
+  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page: anchor().n }) });
   chatLog.scrollTop = chatLog.scrollHeight;
   pollChat();
 }
