@@ -55,6 +55,11 @@
   .links a:hover { background: rgba(0, 90, 255, .12); }
   #tip { position: fixed; display: none; z-index: 20; max-width: 460px; background: var(--tip); border: 1px solid var(--tip-line);
          border-radius: 6px; box-shadow: 0 3px 12px rgba(0,0,0,.2); padding: 8px 10px; font-size: 12px; line-height: 1.45; }
+  #tip.pic { max-width: none; padding: 4px; background: #fff; }
+  :root.dark #tip.pic { background: var(--tip); }
+  .crop { position: relative; }
+  .crop > canvas { display: block; }
+  :root.dark .crop > canvas { filter: invert(.9) hue-rotate(180deg); }
   #back { position: fixed; left: 12px; top: 12px; z-index: 15; display: none; }
   #side { position: fixed; right: 0; top: 0; bottom: 0; width: var(--side); display: flex;
           flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); padding: 10px; }
@@ -461,65 +466,69 @@ function goTo(t) {
 }
 backBtn.onclick = () => { if (history_.length) main.scrollTop = history_.pop(); if (!history_.length) backBtn.style.display = "none"; };
 window.addEventListener("keydown", e => { if (e.altKey && e.key === "ArrowLeft") backBtn.onclick(); });
-async function previewText(d, t) {
-  const page = await d.getPage(t.n);
-  const tc = await page.getTextContent();
-  const y0 = t.y == null ? sizes[t.n - 1].h : t.y;
-  const items = tc.items.filter(it => it.str && it.transform[5] <= y0 + 2 && it.transform[5] > y0 - 80);
-  // Group the items into lines, top to bottom.
+// Text items grouped into lines, top to bottom, between two heights (page units, y up).
+// Baselines within a line differ slightly (labels, superscripts), so each line is ordered by x.
+function textLines(items, top, bottom) {
+  items = items.filter(it => it.str && it.transform[5] <= top && it.transform[5] > bottom);
   items.sort((a, b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]);
-  let lines = [];
+  const lines = [];
   for (const it of items) {
     const l = lines[lines.length - 1];
     if (l && Math.abs(l.y - it.transform[5]) <= 2) l.items.push(it); else lines.push({ y: it.transform[5], items: [it] });
   }
-  // Baselines within a line differ slightly (labels, superscripts), so order each line by x.
   for (const l of lines) l.items.sort((a, b) => a.transform[4] - b.transform[4]);
-  // Keep only the destination's column. Each line splits into runs of touching items; the gap
-  // to the next column, or to the line numbers in the margin, ends a run. The runs of one
-  // column overlap across lines (an indented equation, a bibliography label and its hanging
-  // lines), while a gutter separates them from the other column and the margins, so the
-  // column is the stretch of overlapping runs that holds the target's left edge. Lines with
-  // nothing in it (the space above a heading, say) drop out, instead of showing the other
-  // column at that height.
-  if (t.x != null) {
-    const runsOf = l => {
-      const runs = [];
-      let run = null, solidEnd = null;  // right end of the last item with visible text
-      for (const it of l.items) {
-        const prev = run && run.items[run.items.length - 1];
-        // A trailing space can be stretched up to the margin; a number far past the text is a line number.
-        if (!prev || it.transform[4] - (prev.transform[4] + prev.width) > 8 ||
-            (solidEnd !== null && /^\s*\d+\s*$/.test(it.str) && it.transform[4] - solidEnd > 8)) {
-          run = { items: [], x0: it.transform[4], x1: it.transform[4] }; runs.push(run); solidEnd = null;
-        }
-        run.items.push(it);
-        if (it.str.trim()) { solidEnd = it.transform[4] + it.width; run.x1 = solidEnd; }
-      }
-      return runs;
-    };
-    const rows = lines.map(runsOf);
-    const spans = [];
-    for (const r of rows.flat().sort((a, b) => a.x0 - b.x0)) {
-      const s = spans[spans.length - 1];
-      if (s && r.x0 < s.x1) s.x1 = Math.max(s.x1, r.x1); else spans.push({ x0: r.x0, x1: r.x1 });
+  return lines;
+}
+// A line split into runs of touching items; the gap to the next column, or to the line
+// numbers in the margin, ends a run.
+function runsOf(l) {
+  const runs = [];
+  let run = null, solidEnd = null;  // right end of the last item with visible text
+  for (const it of l.items) {
+    const prev = run && run.items[run.items.length - 1];
+    // A trailing space can be stretched up to the margin; a number far past the text is a line number.
+    if (!prev || it.transform[4] - (prev.transform[4] + prev.width) > 8 ||
+        (solidEnd !== null && /^\s*\d+\s*$/.test(it.str) && it.transform[4] - solidEnd > 8)) {
+      run = { items: [], x0: it.transform[4], x1: it.transform[4] }; runs.push(run); solidEnd = null;
     }
-    const col = spans.find(s => s.x0 - 3 <= t.x && t.x < s.x1);
-    for (const [i, l] of lines.entries()) {
-      if (col) l.items = rows[i].filter(r => r.x0 >= col.x0 && r.x0 < col.x1).flatMap(r => r.items);
-      else {
-        const r = rows[i].find(r => r.x0 >= t.x - 3);
-        l.items = r ? r.items : [];
-      }
-    }
-    lines = lines.filter(l => l.items.length);
+    run.items.push(it);
+    if (it.str.trim()) { solidEnd = it.transform[4] + it.width; run.x1 = solidEnd; }
   }
+  return runs;
+}
+// Keep only the column that holds x. The runs of one column overlap across lines (an indented
+// equation, a bibliography label and its hanging lines), while a gutter separates them from the
+// other column and the margins, so the column is the stretch of overlapping runs that holds x.
+// Lines with nothing in it (the space above a heading, say) drop out, instead of showing the
+// other column at that height. Returns the column, or null when no run covers x; then each
+// line keeps its first run right of x.
+function keepColumn(lines, x) {
+  const rows = lines.map(runsOf), spans = [];
+  for (const r of rows.flat().sort((a, b) => a.x0 - b.x0)) {
+    const s = spans[spans.length - 1];
+    if (s && r.x0 < s.x1) s.x1 = Math.max(s.x1, r.x1); else spans.push({ x0: r.x0, x1: r.x1 });
+  }
+  const col = spans.find(s => s.x0 - 3 <= x && x < s.x1) || null;
+  for (const [i, l] of lines.entries()) {
+    if (col) l.runs = rows[i].filter(r => r.x0 >= col.x0 && r.x0 < col.x1);
+    else { const r = rows[i].find(r => r.x0 >= x - 3); l.runs = r ? [r] : []; }
+    l.items = l.runs.flatMap(r => r.items);
+  }
+  return col;
+}
+const lineText = items => items.map((it, i) => {
+  const prev = items[i - 1];  // a visible gap between items is a space the PDF does not spell out
+  return prev && it.transform[4] - (prev.transform[4] + prev.width) > 1 ? " " + it.str : it.str;
+}).join("");
+async function previewText(d, t) {
+  const page = await d.getPage(t.n);
+  const tc = await page.getTextContent();
+  const y0 = t.y == null ? sizes[t.n - 1].h : t.y;
+  let lines = textLines(tc.items, y0 + 2, y0 - 80);
+  if (t.x != null) { keepColumn(lines, t.x); lines = lines.filter(l => l.items.length); }
   // Drop lines that are only a number: page numbers and margin line numbers.
   lines = lines.filter(l => !/^\s*\d*\s*$/.test(l.items.map(it => it.str).join("")));
-  const text = l => l.items.map((it, i) => {
-    const prev = l.items[i - 1];  // a visible gap between items is a space the PDF does not spell out
-    return prev && it.transform[4] - (prev.transform[4] + prev.width) > 1 ? " " + it.str : it.str;
-  }).join("");
+  const text = l => lineText(l.items);
   // A bibliography entry: start at its label and stop before the next one. The label is on
   // the first line, or the second when the line above the entry is in reach; further down, a
   // line starting with a citation is running text, not an entry.
@@ -531,6 +540,91 @@ async function previewText(d, t) {
   // Rejoin words hyphenated at a line break ("diffu- sion" -> "diffusion").
   const txt = lines.map(text).join(" ").replace(/\s+/g, " ").replace(/(\p{Ll})- (\p{Ll})/gu, "$1$2").trim();
   return txt.length > 500 ? txt.slice(0, 500) + "…" : txt;
+}
+
+// ---- link previews of equations and figures: the part of the page itself ----
+// Boxes are [x0, y0, x1, y1] in page units with y up, like the text items.
+// An equation runs from its anchor down to the line with its number, (12) or (B.3), and takes
+// in the parts of the formula above and below that line (a numerator, a denominator), up to the
+// running text: a line that starts at the column's left edge, where a centered formula does not.
+function equationBox(items, t) {
+  const lines = textLines(items, t.y + 40, t.y - 140), raw = lines.map(runsOf), col = keepColumn(lines, t.x);
+  if (!col) return null;
+  // The number ends a line of the formula, at the column's right edge, and may share a run with
+  // the end of the formula. The edge is where the widest line nearby ends, which can fall short
+  // of it when those lines are short, so the number may lie a little past it, though not as far
+  // as the other column.
+  const numberRun = i => raw[i].find(r => r.x0 >= col.x0 + 12 && r.x0 < col.x1 + 60 && r.x1 >= col.x1 - 4 &&
+    /\(\s*(?:[A-Z]\.?)?\d+(?:\.\d+)*[a-z]?\s*\)\s*$/.test(lineText(r.items)));
+  // Running text starts at the column's left edge; a formula is centered or indented.
+  const text = l => l.runs.length > 0 && l.runs[0].x0 <= col.x0 + 12;
+  const ls = lines.map((l, i) => ({ y: l.y, text: text(l), num: !text(l) && numberRun(i) }))
+    .filter((l, i) => lines[i].items.length || l.num);
+  const num = ls.findIndex(l => l.y <= t.y + 12 && l.num);
+  if (num < 0) return null;
+  let a = num, b = num;
+  while (a > 0 && !(ls[a - 1].text && ls[a - 1].y > t.y - 3)) a--;
+  while (b < ls.length - 1 && !(ls[b + 1].text && ls[b + 1].y < ls[num].y - 3)) b++;
+  const top = a > 0 ? Math.min(ls[a - 1].y - 2.5, ls[a].y + 11) : ls[a].y + 11;
+  const bottom = b < ls.length - 1 ? Math.max(ls[b + 1].y + 10, ls[b].y - 6) : ls[b].y - 6;
+  return [col.x0 - 3, bottom, Math.max(col.x1, ls[num].num.x1) + 2, top];
+}
+// A figure runs from its anchor, at the top of the float, down to the first line of its
+// caption. It is as wide as the stretch of text around the caption: a column, or the page for a
+// figure across both columns.
+function figureBox(items, t) {
+  const lines = textLines(items, t.y + 2, t.y - 700);
+  for (const l of lines) for (const r of runsOf(l)) {
+    // the caption starts at the anchor's left edge, or right of it when centered, but not as far
+    // as the other column
+    if (r.x0 < t.x - 3 || r.x0 > t.x + 200 || !/^\s*(Figure|Fig\.)\s*[A-Z]?\d+[a-z]?\s*[.:]/.test(lineText(r.items))) continue;
+    if (t.y - l.y < 14) return null;  // the anchor is at the caption, not above the figure
+    const col = keepColumn(textLines(items, l.y + 30, l.y - 40), r.x0 + 1) || { x0: t.x, x1: r.x1 };
+    return [col.x0 - 3, l.y - 3, col.x1 + 2, t.y + 3];
+  }
+  return null;
+}
+// The box of a page drawn on a canvas, at most 560 by 420 CSS pixels and at most 1.8 times the
+// page's size, with the photos kept in their colors in dark mode, as on the page.
+async function renderCrop(page, box) {
+  const [vx0, , , vy1] = page.view;
+  const x0 = box[0] - vx0, y0 = vy1 - box[3], w = box[2] - box[0], h = box[3] - box[1];  // from the top-left corner
+  const css = Math.min(1.8, 560 / w, 420 / h), k = css * (window.devicePixelRatio || 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(w * k); canvas.height = Math.ceil(h * k);
+  canvas.style.width = w * css + "px"; canvas.style.height = h * css + "px";
+  // A page already drawn in the view is copied from, which is instant; a page with many shapes
+  // can take seconds to draw. Otherwise the box is drawn in the display intent, which yields to
+  // the browser between frames, so the view stays responsive while it draws.
+  const div = pagesEl.children[page.pageNumber - 1], src = div && div.querySelector(":scope > canvas");
+  const kp = div && +div.dataset.scale * (window.devicePixelRatio || 1);
+  if (src && kp >= 0.75 * k && src.width > 1) {
+    canvas.getContext("2d").drawImage(src, x0 * kp, y0 * kp, w * kp, h * kp, 0, 0, canvas.width, canvas.height);
+  } else {
+    await page.render({ canvasContext: canvas.getContext("2d"),
+                        viewport: page.getViewport({ scale: k, offsetX: -x0 * k, offsetY: -y0 * k }) }).promise;
+  }
+  const wrap = document.createElement("div"); wrap.className = "crop"; wrap.appendChild(canvas);
+  const boxes = div && div._imgs || await imageBoxes(page).catch(() => []);
+  wrap._imgs = boxes.map(b => [b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0]);
+  copyImages(wrap, canvas, k);
+  return wrap;
+}
+// The picture for a link to an equation or a figure, or null for anything else (sections,
+// citations, tables) and when the box is not found; those get the text preview. Each one is
+// drawn once per build of the PDF, on the first hover.
+const pictures = new WeakMap();
+function previewPicture(d, dest, t) {
+  const kind = typeof dest === "string" && t.x != null && t.y != null && /^(equation|figure)\./.exec(dest);
+  if (!kind) return Promise.resolve(null);
+  let m = pictures.get(d);
+  if (!m) pictures.set(d, m = new Map());
+  if (!m.has(dest)) m.set(dest, (async () => {
+    const page = await d.getPage(t.n), items = (await page.getTextContent()).items;
+    const box = kind[1] === "equation" ? equationBox(items, t) : figureBox(items, t);
+    return box && renderCrop(page, box);
+  })().catch(e => { console.error(e); return null; }));
+  return m.get(dest);
 }
 async function buildLinks(div, page, d) {
   const layer = document.createElement("div"); layer.className = "links"; div.appendChild(layer);
@@ -549,13 +643,15 @@ async function buildLinks(div, page, d) {
         hoverLink = a;
         target = target || await resolveDest(d, an.dest);
         if (!target || d !== doc || hoverLink !== a) return;
-        const txt = await previewText(d, target);
-        if (!txt || hoverLink !== a || !a.isConnected) return;
-        tip.textContent = txt;
-        const r = a.getBoundingClientRect();
-        tip.style.left = Math.min(r.left, window.innerWidth - 480) + "px";
-        tip.style.top = (r.bottom + 6 + 120 > window.innerHeight ? r.top - 130 : r.bottom + 6) + "px";
+        const pic = await previewPicture(d, an.dest, target);
+        const txt = pic ? null : await previewText(d, target);
+        if (!(pic || txt) || hoverLink !== a || !a.isConnected) return;
+        if (pic) tip.replaceChildren(pic); else tip.textContent = txt;
+        tip.classList.toggle("pic", !!pic);
         tip.style.display = "block";
+        const r = a.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+        tip.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+        tip.style.top = (r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - 6 - h) : r.bottom + 6) + "px";
       };
       a.onmouseleave = hideTip;
     }
