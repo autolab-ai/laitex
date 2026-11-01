@@ -170,6 +170,8 @@
   .ver .vt .rel { font-style: normal; font-weight: normal; font-size: 11px; color: var(--ins-fg); }
   .ver .rb { margin-top: 6px; font-size: 11px; padding: 2px 8px; }
   .ver .rbn { margin-top: 6px; font-size: 11px; color: #d97757; }
+  .ver.sub { margin-left: 14px; }
+  .ver .gx { margin-top: 4px; font-size: 11px; color: var(--link); cursor: pointer; display: inline-block; }
   .hk { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
   .hk:hover, .hk.on { background: var(--card); }
   .hk .pg { color: var(--faint); font-size: 11px; margin-right: 4px; }
@@ -286,6 +288,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
         <span class="seg"><button id="histSingle" title="The newer build, with added words in green and removals marked in red">changes</button><button id="histSide" title="Both builds side by side">side by side</button></span>
         <label><input type="checkbox" id="histOnly"> changed pages only</label>
         <label title="Text that only moved, for example when a paragraph got shorter, in blue (m)"><input type="checkbox" id="histMovedBox" checked> show moved text</label>
+        <label title="One row per major version, showing everything since its committed build (c)"><input type="checkbox" id="histGroupBox"> group by major version</label>
       </div>
       <div class="row" id="histSum"></div>
     </div>
@@ -346,6 +349,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>s</kbd></td><td>side by side, or changes on one page</td></tr>
           <tr><td><kbd>o</kbd></td><td>changed pages only</td></tr>
           <tr><td><kbd>m</kbd></td><td>show moved text, in blue</td></tr>
+          <tr><td><kbd>c</kbd></td><td>group by major version: everything since the last commit</td></tr>
           <tr><td><kbd>b</kbd></td><td>roll back to the selected version</td></tr>
           <tr><td>select text</td><td>comment on that version</td></tr>
           <tr><td>drag the gray, or <kbd class="altkey">Alt</kbd>+drag</td><td>move the pages around</td></tr>
@@ -1498,6 +1502,32 @@ let histOpen = false, histMode = "side", histOnly = false, histVersions = [], hi
 try { histMode = localStorage.getItem("histView") || "side"; histOnly = localStorage.getItem("histOnly") === "1"; } catch (e) {}
 document.getElementById("histOnly").checked = histOnly;
 const histDocs = new Map();  // version -> promise of {d, toks, sizes}
+// Grouping: one row per major version (v6 is the committed v6.0 and the v6.x after it), showing
+// its newest build against the committed one, so a review since the last commit is one diff.
+let histGroup = false;
+try { histGroup = localStorage.getItem("histGroup") === "1"; } catch (e) {}
+document.getElementById("histGroupBox").checked = histGroup;
+const histOpenGroups = new Set();  // majors whose versions are listed under their row
+const groupStats = new Map();  // "base:rev>last:rev" -> text counts, like a build's
+function histGroups() {
+  const groups = [];
+  for (const v of histVersions) {
+    const m = /^v(\d+)\./.exec(v.name || ""), major = m ? +m[1] : 0;
+    let g = groups[groups.length - 1];
+    if (!g || g.major !== major) groups.push(g = { major, vs: [] });
+    g.vs.push(v);
+  }
+  // The base is the committed build the group starts with, or, for the builds before any commit,
+  // the first one kept. A group of one build is compared with the build before, as usual.
+  for (const g of groups) {
+    const first = g.vs[0];
+    g.last = g.vs[g.vs.length - 1].n;
+    g.base = g.vs.length > 1 && (first.release || !prevOf(first.n)) ? first.n : prevOf(first.n);
+  }
+  return groups;
+}
+const groupKey = g => `${g.base}:${revOf(g.base)}>${g.last}:${revOf(g.last)}`;
+const groupOf = n => histGroups().find(g => g.vs.some(v => v.n === n));
 
 // The words of a build, each with its boxes on the page (fractions of the page size). Left out:
 // margin line numbers, which move with every reflow, and page furniture (running headers that
@@ -1638,6 +1668,13 @@ async function fillStats() {
       if (!(v.stats && v.stats.moves)) await saveStats(v.n, statsOf(A, B, wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
       histRenderList();
     }
+    for (const g of histGroup ? histGroups().reverse() : []) {
+      if (!histOpen) break;
+      if (!g.base || g.base === g.last || groupStats.has(groupKey(g))) continue;
+      const [A, B] = await Promise.all([histDoc(g.base), histDoc(g.last)]);
+      groupStats.set(groupKey(g), statsOf(A, B, wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
+      histRenderList();
+    }
   } catch (e) { console.error(e); } finally { statsRunning = false; }
 }
 async function histShow() {
@@ -1701,6 +1738,8 @@ async function histShow() {
     sum.append(key);
   }
   const v = histVersions.find(v => v.n === b);
+  const g = A && histGroups().find(g => g.base === a && g.last === b && g.base !== g.last);
+  if (g && !groupStats.has(groupKey(g))) groupStats.set(groupKey(g), statsOf(A, B, raw));
   if (A && a === prevOf(b) && v && !v.stats) saveStats(b, statsOf(A, B, raw));
   else if (A && a === prevOf(b) && v && v.stats && !v.stats.moves) saveStats(b, statsOf(A, B, raw));  // counted before moves were matched
   histLayout();
@@ -1883,8 +1922,13 @@ async function histRender(div, tok) {
 }
 // The builds, newest first, each with how much text it changed. The selected one opens to list
 // its changes and the comments answered with it; clicking another compares it with the build before.
+const statsText = x => {
+  const num = (cls, sign, k) => `<span class="${cls}">${sign}${Number(x[k]) || 0}</span>`;
+  return Number(x.changes) ? `${num("p", "+", "la")} ${num("m", "−", "ld")} lines · ${num("p", "+", "ca")} ${num("m", "−", "cd")} characters`
+                           : "no text changes";
+};
 function histRenderList() {
-  const top = histList.scrollTop, sel = +histB.value;
+  const top = histList.scrollTop, sel = +histB.value, against = +histA.value;
   histList.replaceChildren();
   if (!histVersions.length) {
     const n = document.createElement("div"); n.className = "note";
@@ -1892,58 +1936,92 @@ function histRenderList() {
     histList.append(n); return;
   }
   const latest = histVersions[histVersions.length - 1].n, first = histVersions[0].n;
-  for (const v of histVersions.slice().reverse()) {
-    const row = document.createElement("div"); row.className = "ver" + (v.n === sel ? " on" : "");
-    const t = document.createElement("div"); t.className = "vt";
-    const name = document.createElement("b"); name.textContent = nameOf(v.n) + (v.n === latest ? " (current)" : "");
-    if (!v.sealed) { const ip = document.createElement("i"); ip.textContent = " in progress"; name.append(ip); }
-    if (v.release) { const r = document.createElement("span"); r.className = "rel"; r.textContent = " committed"; name.append(r); }
-    const when = document.createElement("span");
-    when.textContent = vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    t.append(name, when);
-    const st = document.createElement("div"); st.className = "vs";
-    if (v.stats) {
-      const x = v.stats, num = (cls, sign, k) => `<span class="${cls}">${sign}${Number(x[k]) || 0}</span>`;
-      st.innerHTML = Number(x.changes) ? `${num("p", "+", "la")} ${num("m", "−", "ld")} lines · ${num("p", "+", "ca")} ${num("m", "−", "cd")} characters`
-                                        : "no text changes";
-    } else st.textContent = v.n === first ? "the first build kept" : "counting…";
-    row.append(t, st);
-    if (v.label && v.label !== "the first build kept") {
-      const l = document.createElement("div"); l.className = "vl"; l.textContent = v.label; row.append(l);
-    }
-    // Any sealed version but the newest can be restored; the agent does it, the viewer only asks.
-    const rolling = request_ && request_.action === "rollback" && request_.version === v.n;
-    if (rolling) {
-      const n = document.createElement("div"); n.className = "rbn";
-      n.textContent = `rolling back to ${nameOf(v.n)}, ${agentName} is working…`; row.append(n);
-    } else if (v.sealed && v.source && v.n !== latest) {
-      const btn = document.createElement("button"); btn.className = "rb"; btn.textContent = "roll back to this version";
-      btn.title = `Ask ${agentName} to restore the source of ${nameOf(v.n)} and rebuild`;
-      btn.onclick = async e => {
-        e.stopPropagation();
-        const later = histVersions.filter(x => x.n > v.n).map(x => x.name).join(", ");
-        if (!confirm(`Ask ${agentName} to restore the source of ${nameOf(v.n)} and rebuild? ${later} will be removed from the history.`)) return;
-        request_ = await (await fetch("/api/request", { method: "POST", headers: H,
-                                                       body: JSON.stringify({ action: "rollback", version: v.n }) })).json();
-        histRenderList();
-      };
-      row.append(btn);
-    }
-    if (v.n === sel) { if (cmp && cmp.b === sel) row.append(histDetails()); }
-    else row.onclick = () => { histB.value = v.n; histA.value = prevOf(v.n); histShow(); };
-    histList.append(row);
+  if (!histGroup) for (const v of histVersions.slice().reverse()) histList.append(verRow(v, latest, first, sel, against));
+  else for (const g of histGroups().reverse()) {
+    histList.append(groupRow(g, latest, sel, against));
+    if (histOpenGroups.has(g.major)) for (const v of g.vs.slice().reverse()) histList.append(verRow(v, latest, first, sel, against, true));
   }
   histList.scrollTop = top;
+}
+// A major version: its newest build against the committed one it starts from.
+function groupRow(g, latest, sel, against) {
+  const on = sel === g.last && against === g.base;
+  const row = document.createElement("div"); row.className = "ver" + (on ? " on" : "");
+  const t = document.createElement("div"); t.className = "vt";
+  const name = document.createElement("b"), lastV = g.vs[g.vs.length - 1];
+  name.textContent = `v${g.major}` + (g.last === latest ? " (current)" : "");
+  const when = document.createElement("span");
+  when.textContent = vTime(lastV).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  t.append(name, when);
+  const range = document.createElement("div"); range.className = "vl";
+  range.textContent = g.base && g.base !== g.last ? `${nameOf(g.last)} against ${nameOf(g.base)}${g.vs[0].release ? ", the committed build" : ""}` : nameOf(g.last);
+  const st = document.createElement("div"); st.className = "vs";
+  const x = groupStats.get(groupKey(g));
+  if (g.vs.length === 1 && lastV.stats) st.innerHTML = statsText(lastV.stats);
+  else if (x) st.innerHTML = statsText(x);
+  else if (g.base && g.base !== g.last) st.textContent = "counting…";
+  row.append(t, range, st);
+  if (g.vs.length > 1) {
+    const gx = document.createElement("span"); gx.className = "gx";
+    const open = histOpenGroups.has(g.major);
+    gx.textContent = `${open ? "▾ hide" : "▸ show"} its ${g.vs.length} versions`;
+    gx.onclick = e => { e.stopPropagation(); if (open) histOpenGroups.delete(g.major); else histOpenGroups.add(g.major); histRenderList(); };
+    row.append(document.createElement("br"), gx);
+  }
+  if (on) { if (cmp && cmp.b === g.last && cmp.a === g.base) row.append(histDetails()); }
+  else row.onclick = () => { histB.value = g.last; histA.value = g.base; histShow(); };
+  return row;
+}
+// One build, with how much text it changed against the build before.
+function verRow(v, latest, first, sel, against, sub) {
+  const on = v.n === sel && (!histGroup || against === prevOf(v.n));
+  const row = document.createElement("div"); row.className = "ver" + (on ? " on" : "") + (sub ? " sub" : "");
+  const t = document.createElement("div"); t.className = "vt";
+  const name = document.createElement("b"); name.textContent = nameOf(v.n) + (v.n === latest ? " (current)" : "");
+  if (!v.sealed) { const ip = document.createElement("i"); ip.textContent = " in progress"; name.append(ip); }
+  if (v.release) { const r = document.createElement("span"); r.className = "rel"; r.textContent = " committed"; name.append(r); }
+  const when = document.createElement("span");
+  when.textContent = vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  t.append(name, when);
+  const st = document.createElement("div"); st.className = "vs";
+  if (v.stats) st.innerHTML = statsText(v.stats);
+  else st.textContent = v.n === first ? "the first build kept" : "counting…";
+  row.append(t, st);
+  if (v.label && v.label !== "the first build kept") {
+    const l = document.createElement("div"); l.className = "vl"; l.textContent = v.label; row.append(l);
+  }
+  // Any sealed version but the newest can be restored; the agent does it, the viewer only asks.
+  const rolling = request_ && request_.action === "rollback" && request_.version === v.n;
+  if (rolling) {
+    const n = document.createElement("div"); n.className = "rbn";
+    n.textContent = `rolling back to ${nameOf(v.n)}, ${agentName} is working…`; row.append(n);
+  } else if (v.sealed && v.source && v.n !== latest) {
+    const btn = document.createElement("button"); btn.className = "rb"; btn.textContent = "roll back to this version";
+    btn.title = `Ask ${agentName} to restore the source of ${nameOf(v.n)} and rebuild`;
+    btn.onclick = async e => {
+      e.stopPropagation();
+      const later = histVersions.filter(x => x.n > v.n).map(x => x.name).join(", ");
+      if (!confirm(`Ask ${agentName} to restore the source of ${nameOf(v.n)} and rebuild? ${later} will be removed from the history.`)) return;
+      request_ = await (await fetch("/api/request", { method: "POST", headers: H,
+                                                     body: JSON.stringify({ action: "rollback", version: v.n }) })).json();
+      histRenderList();
+    };
+    row.append(btn);
+  }
+  if (on) { if (cmp && cmp.b === sel) row.append(histDetails()); }
+  else row.onclick = () => { histB.value = v.n; histA.value = prevOf(v.n); histShow(); };
+  return row;
 }
 function histDetails() {
   const box = document.createElement("div"); box.className = "vd";
   const add = (tag, text, cls) => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; box.append(e); return e; };
-  if (cmp.a && cmp.a !== prevOf(cmp.b)) add("div", `compared with ${nameOf(cmp.a)}`, "note");
+  const grouped = histGroup && histGroups().some(g => g.base === cmp.a && g.last === cmp.b && g.base !== g.last);
+  if (cmp.a && cmp.a !== prevOf(cmp.b) && !grouped) add("div", `compared with ${nameOf(cmp.a)}`, "note");
   const vs = histVersions, iB = vs.findIndex(v => v.n === cmp.b), iA = vs.findIndex(v => v.n === cmp.a);
   const from = vTime(vs[iA >= 0 ? iA + 1 : iB]), to = vs[iB + 1] ? vTime(vs[iB + 1]) : new Date(8.64e15);
   const answered = comments.filter(c => c.replied && c.reply && (t => t >= from && t < to)(new Date(c.replied.replace(" ", "T"))));
   if (answered.length) {
-    add("h4", "Comments answered with this build");
+    add("h4", grouped ? `Comments answered since ${nameOf(cmp.a)}` : "Comments answered with this build");
     for (const c of answered) {
       const e = add("div", "", "hk cm");
       const q = document.createElement("div"); q.style.fontStyle = "italic"; q.style.color = "var(--muted)";
@@ -2004,7 +2082,8 @@ async function setHist(open) {
     const now_ = histVersions[histVersions.length - 1];
     const gone = !histVersions.some(v => v.n === shown);  // removed by a rollback
     if (now_ && (gone || (wasLatest && (now_.n !== before || now_.rev !== beforeRev)))) {
-      histB.value = now_.n; histA.value = prevOf(now_.n); histShow();
+      const g = histGroup && groupOf(now_.n);
+      histB.value = now_.n; histA.value = g ? g.base : prevOf(now_.n); histShow();
     } else histRenderList();
     fillStats();
   }, 3000);
@@ -2016,6 +2095,13 @@ document.getElementById("histMovedBox").onchange = e => {
   histMoved = e.target.checked;
   try { localStorage.setItem("histMoved", histMoved ? "1" : "0"); } catch (err) {}
   if (cmp) histLayout();
+};
+document.getElementById("histGroupBox").onchange = e => {
+  histGroup = e.target.checked;
+  try { localStorage.setItem("histGroup", histGroup ? "1" : "0"); } catch (err) {}
+  const b = +histB.value, g = histGroup && groupOf(b);
+  if (g) { histB.value = g.last; histA.value = g.base; } else if (b) histA.value = prevOf(b);
+  histShow(); fillStats();
 };
 document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
 histPages.addEventListener("scroll", () => { tip.style.display = "none"; saveSoon(); });
@@ -2303,6 +2389,13 @@ function stepComment(dir) {
   if (card) { card.click(); card.scrollIntoView({ block: "nearest" }); }
 }
 function stepVersion(dir) {  // dir 1: newer, -1: older
+  if (histGroup) {
+    const gs = histGroups(), g = gs[gs.findIndex(g => g.vs.some(v => v.n === +histB.value)) + dir];
+    if (!g) return;
+    histB.value = g.last; histA.value = g.base; histCur = -1;
+    histShow().then(() => { const row = histList.querySelector(".ver.on"); if (row) row.scrollIntoView({ block: "nearest" }); });
+    return;
+  }
   const i = histVersions.findIndex(v => v.n === +histB.value), v = histVersions[i + dir];
   if (!v) return;
   histB.value = v.n; histA.value = prevOf(v.n); histCur = -1;
@@ -2339,6 +2432,7 @@ window.addEventListener("keydown", e => {
     s: () => document.getElementById(histMode === "side" ? "histSingle" : "histSide").click(),
     o: () => document.getElementById("histOnly").click(),
     m: () => document.getElementById("histMovedBox").click(),
+    c: () => document.getElementById("histGroupBox").click(),
     b: () => { const btn = histList.querySelector(".ver.on .rb"); if (btn) btn.click(); },
   });
   if (sideTab === "log") Object.assign(keys, {

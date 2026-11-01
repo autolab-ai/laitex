@@ -129,8 +129,10 @@ The viewer also:
   the selected build lists its changes and the comments answered in it. A version is one chunk
   of the agent's work: the agent closes it with `laitex checkpoint`, which in a git repository also
   records the source in a commit under `refs/laitex/` (on no branch, never pushed), so any version
-  can be rolled back to from the tab; the agent restores the files and rebuilds. Builds are kept in your cache
-  folder (`~/Library/Caches/laitex` or `~/.cache/laitex`), the last 40 per PDF, and a rebuild
+  can be rolled back to from the tab; the agent restores the files and rebuilds. Grouping by
+  major version (a checkbox, or `c`) folds the builds after each commit into one row that shows
+  the newest of them against the committed build, so everything since the last commit is one
+  diff. Builds are kept in your cache folder (`~/Library/Caches/laitex` or `~/.cache/laitex`), the last 40 per PDF, and a rebuild
   that changes nothing is not kept;
 - has a chat with the agent (the chat button; × hides it). With Claude Code the panel mirrors
   the agent's session, so you see the same conversation as in the terminal, with tool calls
