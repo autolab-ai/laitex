@@ -491,7 +491,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
       <div class="row">
         <span class="seg"><button id="histSingle" title="The newer version with its changes marked: added words in green, removals in red (the code: one column)">changes</button><button id="histSide" title="The older and the newer version next to each other, the pages and the code">side by side</button></span>
         <label id="histOnlyLbl"><input type="checkbox" id="histOnly"> <span id="histOnlyTx">changed pages only</span></label>
-        <label title="Text that only moved, for example when a paragraph got shorter, in blue (m)"><input type="checkbox" id="histMovedBox" checked> show moved text</label>
+        <label title="Text that only moved or was renumbered, for example when a paragraph got shorter or a figure was added, in blue (m)"><input type="checkbox" id="histMovedBox" checked> show moved text</label>
         <label title="One row per major version, showing everything since its committed build (c)"><input type="checkbox" id="histGroupBox"> group by major version</label>
       </div>
       <div class="row" id="histSum"></div>
@@ -1664,7 +1664,7 @@ function myers(a, b, limit = 4000) {
 // added unchanged in another count as moved, not changed. Returns 1 for each removed word of A
 // and each added word of B that is left.
 function changedWords(a, b, d) {
-  const aDel = new Uint8Array(a.length), bIns = new Uint8Array(b.length), K = 6, index = new Map();
+  const aDel = new Uint8Array(a.length), bIns = new Uint8Array(b.length), K = 6, index = new Map(), runs = [];
   for (const h of d.raw) { aDel.fill(1, h.a0, h.a1); bIns.fill(1, h.b0, h.b1); }
   const run = (m, i) => { for (let t = 0; t < K; t++) if (!m[i + t]) return false; return true; };
   for (let j = 0; j + K <= b.length; j++) {
@@ -1681,9 +1681,73 @@ function changedWords(a, b, d) {
       while (i + L < a.length && j + L < b.length && aDel[i + L] && bIns[j + L] && a[i + L] === b[j + L]) L++;
       if (L > best) { best = L; bj = j; }
     }
-    if (best >= K) { aDel.fill(0, i, i + best); bIns.fill(0, bj, bj + best); i += best; } else i++;
+    if (best >= K) { aDel.fill(0, i, i + best); bIns.fill(0, bj, bj + best); runs.push([i, bj, best]); i += best; } else i++;
+  }
+  const skel = w => w.replace(/\d+/g, "#"), refLike = w => /\d/.test(w) && !/\d[.,]\d/.test(w) && !/\d{4}/.test(w);
+  const shifted = (i, j) => refLike(a[i]) && refLike(b[j]) && skel(a[i]) === skel(b[j]);
+  // A moved block carries its own renumbering along: a caption's "6." that became "7." sits
+  // right before the moved caption, on both sides.
+  for (const [i, j, L] of runs) {
+    for (let s = 1; i - s >= 0 && j - s >= 0 && aDel[i - s] && bIns[j - s] && shifted(i - s, j - s); s++) { aDel[i - s] = 0; bIns[j - s] = 0; }
+    for (let s = 0; i + L + s < a.length && j + L + s < b.length && aDel[i + L + s] && bIns[j + L + s] && shifted(i + L + s, j + L + s); s++) { aDel[i + L + s] = 0; bIns[j + L + s] = 0; }
+  }
+  // A word hyphenated across a float: "con-" at the foot of one column and "stant" after the
+  // figure that follows it, where the other build has "constant" (keys drop the hyphen). Either
+  // build may hold the split word.
+  const rejoin = (x, xm, y, ym, i, lo, hi) => {
+    for (let q = Math.max(0, lo); q < Math.min(y.length, hi); q++) {
+      if (!ym[q] || y[q].length >= x[i].length || !x[i].endsWith(y[q])) continue;
+      const head = x[i].slice(0, x[i].length - y[q].length);
+      for (let p = q - 1; p >= Math.max(0, q - 400); p--)
+        if (ym[p] && y[p] === head) { xm[i] = 0; ym[p] = 0; ym[q] = 0; return; }
+    }
+  };
+  for (const h of d.raw) {
+    for (let i = h.a0; i < h.a1; i++) if (aDel[i] && /\p{L}{4}/u.test(a[i])) rejoin(a, aDel, b, bIns, i, h.b0 - 400, h.b1 + 400);
+    for (let j = h.b0; j < h.b1; j++) if (bIns[j] && /\p{L}{4}/u.test(b[j])) rejoin(b, bIns, a, aDel, j, h.a0 - 400, h.a1 + 400);
+  }
+  // Numbers that only shifted: a figure, equation, section or citation renumbered because one was
+  // added before it ("Fig. 5" -> "Fig. 6", "[23]" -> "[24]"). Within a change, words of A and B
+  // that differ only in small whole numbers count as moved, not changed; decimals are data and
+  // stay changes.
+  for (const h of d.raw) {
+    const ia = [], jb = [];
+    for (let i = h.a0; i < h.a1; i++) if (aDel[i]) ia.push(i);
+    for (let j = h.b0; j < h.b1; j++) if (bIns[j]) jb.push(j);
+    if (!ia.length || ia.length !== jb.length) continue;
+    const same = (i, j) => a[i] === b[j];
+    if (ia.every((i, k) => same(i, jb[k]) || shifted(i, jb[k])) && ia.some((i, k) => !same(i, jb[k]))) {
+      for (const i of ia) aDel[i] = 0;
+      for (const j of jb) bIns[j] = 0;
+    }
   }
   return { aDel, bIns };
+}
+// The word diff of two builds' text. Short runs of unchanged words between two changes are mostly
+// chance matches ("the", "to") inside text that changed or moved: a moved paragraph that the
+// diff threads through the text now in its place comes out in pieces too short to be seen as
+// moved. A run of at most two words, and no longer than the change on either side of it, joins
+// the two changes.
+function pdfDiff(a, b) {
+  const d = wordDiff(a, b), size = h => Math.max(h.a1 - h.a0, h.b1 - h.b0);
+  let raw = d.raw, again = true;
+  while (again) {
+    again = false;
+    const out = [];
+    for (const h of raw) {
+      const last = out[out.length - 1], gap = last ? h.a0 - last.a1 : Infinity;
+      if (last && gap <= 2 && gap <= Math.min(size(last), size(h))) { out[out.length - 1] = { a0: last.a0, a1: h.a1, b0: last.b0, b1: h.b1 }; again = true; }
+      else out.push(h);
+    }
+    raw = out;
+  }
+  const merged = [];
+  for (const h of raw) {
+    const last = merged[merged.length - 1];
+    if (last && h.a0 - last.a1 <= 2 && h.b0 - last.b1 <= 2) { last.a1 = h.a1; last.b1 = h.b1; }
+    else merged.push({ ...h });
+  }
+  return { raw, merged };
 }
 // The longest chain of pairs increasing in both indices (pairs sorted by the first).
 function longestChain(c) {
@@ -1897,8 +1961,11 @@ function statsOf(A, B, d) {
   const [ld, cd] = count(A.toks, aDel), [la, ca] = count(B.toks, bIns);
   const any = (m, i0, i1) => { for (let i = i0; i < i1; i++) if (m[i]) return true; return false; };
   const changes = d.merged.filter(h => any(aDel, h.a0, h.a1) || any(bIns, h.b0, h.b1)).length;
-  return { la, ld, ca, cd, changes, moves: 1 };
+  return { la, ld, ca, cd, changes, moves: STATS_VERSION };
 }
+// Version of the diff behind saved counts: 1 matched moved text, 2 also keeps moved blocks whole
+// and treats renumbering as moved.
+const STATS_VERSION = 2;
 async function saveStats(n, st) {
   const v = histVersions.find(v => v.n === n);
   if (v) v.stats = st;
@@ -1914,16 +1981,16 @@ async function fillStats() {
     for (const v of histVersions.slice().reverse()) {
       const p = prevOf(v.n);
       if (!histOpen) break;
-      if ((v.stats && v.stats.moves) || !p) continue;  // counts from before moves were matched are redone
+      if ((v.stats && v.stats.moves === STATS_VERSION) || !p) continue;  // counts from an older diff are redone
       const [A, B] = await Promise.all([histDoc(p), histDoc(v.n)]);
-      if (!(v.stats && v.stats.moves)) await saveStats(v.n, statsOf(A, B, wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
+      if (!(v.stats && v.stats.moves === STATS_VERSION)) await saveStats(v.n, statsOf(A, B, pdfDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
       histRenderList();
     }
     for (const g of histGroup ? histGroups().reverse() : []) {
       if (!histOpen) break;
       if (!g.base || g.base === g.last || groupStats.has(groupKey(g))) continue;
       const [A, B] = await Promise.all([histDoc(g.base), histDoc(g.last)]);
-      groupStats.set(groupKey(g), statsOf(A, B, wordDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
+      groupStats.set(groupKey(g), statsOf(A, B, pdfDiff(A.toks.map(t => t.key), B.toks.map(t => t.key))));
       histRenderList();
     }
   } catch (e) { console.error(e); } finally { statsRunning = false; }
@@ -1946,7 +2013,7 @@ async function histShow() {
   if (tok !== histToken) return;
   // Which tokens changed, and which change (merged hunk) each belongs to.
   const aKeys = A ? A.toks.map(t => t.key) : [], bKeys = B.toks.map(t => t.key);
-  const raw = A ? wordDiff(aKeys, bKeys) : { raw: [], merged: [] };
+  const raw = A ? pdfDiff(aKeys, bKeys) : { raw: [], merged: [] };
   const moved = A ? changedWords(aKeys, bKeys, raw) : { aDel: [], bIns: [] };
   // Words the diff saw removed and added elsewhere, unchanged: they only moved.
   const aMv = new Uint8Array(aKeys.length), bMv = new Uint8Array(bKeys.length);
@@ -1993,7 +2060,7 @@ async function histShow() {
   const g = A && histGroups().find(g => g.base === a && g.last === b && g.base !== g.last);
   if (g && !groupStats.has(groupKey(g))) groupStats.set(groupKey(g), statsOf(A, B, raw));
   if (A && a === prevOf(b) && v && !v.stats) saveStats(b, statsOf(A, B, raw));
-  else if (A && a === prevOf(b) && v && v.stats && !v.stats.moves) saveStats(b, statsOf(A, B, raw));  // counted before moves were matched
+  else if (A && a === prevOf(b) && v && v.stats && v.stats.moves !== STATS_VERSION) saveStats(b, statsOf(A, B, raw));  // counted with an older diff
   histLayout();
   histRenderList();
 }
