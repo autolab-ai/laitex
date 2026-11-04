@@ -214,6 +214,9 @@
   .ti .st { font: 600 10px ui-monospace, Menlo, monospace; width: 10px; text-align: center; }
   .ti .st.M { color: #c9881c; } .ti .st.A { color: var(--ins-fg); } .ti .st.D { color: var(--del-fg); }
   .ti .st.in { color: var(--muted); font-weight: normal; }
+  .ti .loc { flex: none; display: inline-flex; gap: 4px; font: 10px ui-monospace, Menlo, monospace; }
+  .ti .loc .la { color: var(--ins-fg); } .ti .loc .lr { color: var(--del-fg); }  /* not .m, which is a chat message */
+  .ti.dir .loc { opacity: .75; }
   #treeBtn.on { background: var(--answered); border-color: var(--answered); color: #fff; }
   #filePath { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #filePath b { color: var(--fg); font-weight: 500; }
@@ -277,7 +280,7 @@
   @keyframes syncfade { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
   /* the source diff in the History tab */
   .cdHead { color: var(--muted); margin: 0 0 10px; }
-  .cdFile { margin: 0 0 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); overflow: hidden; }
+  .cdFile { margin: 0 0 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); overflow: clip; }
   .cdName { display: flex; gap: 8px; align-items: baseline; padding: 5px 9px; background: var(--panel); border-bottom: 1px solid var(--line);
             font: 12px ui-monospace, Menlo, monospace; position: sticky; top: -10px; z-index: 1; }
   .cdName b { font-weight: 600; overflow-wrap: anywhere; }
@@ -483,7 +486,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
       <span>against</span><select id="histA" title="The build to compare it with"></select>
       <div class="row">
         <span class="seg"><button id="histSingle" title="The newer version with its changes marked: added words in green, removals in red (the code: one column)">changes</button><button id="histSide" title="The older and the newer version next to each other, the pages and the code">side by side</button></span>
-        <label><input type="checkbox" id="histOnly"> changed pages only</label>
+        <label id="histOnlyLbl"><input type="checkbox" id="histOnly"> <span id="histOnlyTx">changed pages only</span></label>
         <label title="Text that only moved, for example when a paragraph got shorter, in blue (m)"><input type="checkbox" id="histMovedBox" checked> show moved text</label>
         <label title="One row per major version, showing everything since its committed build (c)"><input type="checkbox" id="histGroupBox"> group by major version</label>
       </div>
@@ -556,7 +559,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>newer, older version</td></tr>
           <tr><td><kbd>&rarr;</kbd> <kbd>&larr;</kbd> or <kbd>n</kbd> <kbd>p</kbd></td><td>next, previous change</td></tr>
           <tr><td><kbd>s</kbd></td><td>side by side, or changes on one page</td></tr>
-          <tr><td><kbd>o</kbd></td><td>changed pages only</td></tr>
+          <tr><td><kbd>o</kbd></td><td>changed pages only; in the code, changed lines only, or each changed file whole</td></tr>
           <tr><td><kbd>m</kbd></td><td>show moved text, in blue</td></tr>
           <tr><td><kbd>c</kbd></td><td>group by major version: everything since the last commit</td></tr>
           <tr><td><kbd>b</kbd></td><td>roll back to the selected version</td></tr>
@@ -2267,7 +2270,7 @@ function histDetails() {
       const pl = document.createElement("ins"); pl.textContent = "+" + f.add;
       const mi = document.createElement("del"); mi.style.textDecoration = "none"; mi.textContent = " −" + f.del;
       e.append(n, p, pl, mi);
-      e.onclick = () => { const t = codeHist.querySelector(`.cdFile[data-path="${CSS.escape(f.path)}"]`); if (t) codeHist.scrollTop = t.offsetTop - 10; };
+      e.onclick = () => showFileDiff(f.path);
     }
   }
   const vs = histVersions, iB = vs.findIndex(v => v.n === cmp.b), iA = vs.findIndex(v => v.n === cmp.a);
@@ -2359,7 +2362,22 @@ document.getElementById("histGroupBox").onchange = e => {
   if (g) { histB.value = g.last; histA.value = g.base; } else if (b) histA.value = prevOf(b);
   histShow(); fillStats();
 };
-document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
+// In the code the same box picks the changed lines with a few around them (on) or each changed file
+// whole (off), as it picks the changed pages or every page of the PDF.
+document.getElementById("histOnly").onchange = e => {
+  histOnly = e.target.checked;
+  try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {}
+  if (cmp) histLayout();
+  flipped.clear();
+  codeHistShow(true);
+};
+function histOnlyLabel() {
+  const [t, tip] = !codeShown() ? ["changed pages only", "Only the pages that changed; off, every page (o)"]
+    : pane === "code" ? ["changed lines only", "Only the changed lines of each file, with a few lines around them; off, each changed file whole (o)"]
+    : ["changes only", "Only the changed pages, and the changed lines of each file; off, every page and each changed file whole (o)"];
+  document.getElementById("histOnlyTx").textContent = t;
+  document.getElementById("histOnlyLbl").title = tip;
+}
 histPages.addEventListener("scroll", () => { tip.style.display = "none"; saveSoon(); });
 window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName) && !inCode(e.target)) setTab("review"); });
 
@@ -2747,6 +2765,7 @@ function setPane(p, first) {
   if (renderShown()) { gen++; layout(place); renderVisible(); } else hiddenPlace = place;
   if (histOpen && cmp) { histToken++; histLayout(); }
   hideChip();
+  histOnlyLabel();
   if (codeShown()) ensureEditor().then(() => { codeShow(); refreshFiles(); if (histOpen) codeHistShow(); }).catch(() => {});
   if (histOpen) histRenderList();
 }
@@ -2834,12 +2853,23 @@ function drawTree() {
     return el;
   };
   const span = (cls, text) => { const e = document.createElement("span"); e.className = cls; if (text != null) e.textContent = text; return e; };
+  const loc = (add, del) => {  // the lines added and removed, as in the diff's headers
+    const e = span("loc");
+    if (add) e.append(span("la", "+" + add));
+    if (del) e.append(span("lr", "−" + del));
+    e.title = `${add} line${add === 1 ? "" : "s"} added, ${del} removed`;
+    return e;
+  };
   const walk = (node, depth) => {
     for (const [name, d] of [...node.dirs].sort((a, b) => a[0].localeCompare(b[0]))) {
       const closed = treeCollapsed.has(d.path), el = row(depth, "dir", { dir: d.path });
-      const changed = diff && [...diff.keys()].some(p => p.startsWith(d.path + "/"));
+      const changed = diff && [...diff.values()].filter(f => f.path.startsWith(d.path + "/"));
       el.append(span("tw", closed ? "▸" : "▾"), span("nm", name));
-      if (changed) { const st = span("st in", "•"); st.title = "has changed files"; el.append(st); }
+      if (changed && changed.length) {
+        const add = changed.reduce((n, f) => n + f.add, 0), del = changed.reduce((n, f) => n + f.del, 0);
+        if (add || del) el.append(loc(add, del));
+        const st = span("st in", "•"); st.title = `${changed.length} changed file${changed.length === 1 ? "" : "s"}`; el.append(st);
+      }
       el.title = d.path + "/";
       if (!closed) walk(d, depth + 1);
     }
@@ -2848,7 +2878,10 @@ function drawTree() {
       const el = row(depth, (p === curPath && !diff ? "on " : "") + (gone ? "gone " : "") + (f && (f.dirty || f.saving) ? "dirty" : ""), { path: p });
       el.append(span("tw", ""), span("ic " + kindOf(p)), span("nm", baseName(p)), span("dirty", "●"));
       if (counts.get(p)) { const cc = span("cc", counts.get(p)); cc.title = `${counts.get(p)} open comment${counts.get(p) === 1 ? "" : "s"}`; el.append(cc); }
-      if (ch) { const st = span("st " + ch.status, ch.status); st.title = { M: "changed", A: "new", D: "deleted" }[ch.status] + ` (+${ch.add} −${ch.del})`; el.append(st); }
+      if (ch) {
+        if (ch.add || ch.del) el.append(loc(ch.add, ch.del));
+        const st = span("st " + ch.status, ch.status); st.title = { M: "changed", A: "new", D: "deleted" }[ch.status]; el.append(st);
+      }
       el.title = p;
     }
   };
@@ -2878,11 +2911,7 @@ treeEl.addEventListener("click", e => {
     return drawTree();
   }
   const p = el.dataset.path, diff = treeDiff();
-  if (diff && diff.has(p)) {  // in History: that file's changes
-    const box = codeHist.querySelector(`.cdFile[data-path="${CSS.escape(p)}"]`);
-    if (box) codeHist.scrollTop = box.offsetTop - 10;
-    return;
-  }
+  if (diff && diff.has(p)) return showFileDiff(p);  // in History: that file's changes
   if (!fileList.includes(p) && p !== curPath) return;
   if (histOpen) setTab("review");
   openFile(p);
@@ -3508,27 +3537,51 @@ buildBtn.onclick = compile;
 // ---- the source in the History tab: the files that changed between the two versions ----
 // The server compares the versions' snapshots in git (refs/laitex/...); the version in progress is
 // the files as they are now. Changed lines are paired up and their changed words marked.
+// "changed pages only" shows each file's changed lines with a few around them; off, each changed file
+// is shown whole. "whole file" and "changes only" over a file flip that file alone.
 let codeDiff = null, codeHistTok = 0;
-async function codeHistShow() {
+const flipped = new Set();  // the files shown the other way, for the two versions on show
+const ctxOf = whole => whole ? 100000 : 3;
+const diffTop = el => el.getBoundingClientRect().top - codeHist.getBoundingClientRect().top + codeHist.scrollTop;
+async function codeHistShow(keep) {  // keep: the file at the top of the view stays there
   if (!histOpen || !codeShown()) return;
   const a = +histA.value, b = +histB.value, tok = ++codeHistTok;
   if (!b) { codeHist.replaceChildren(); return; }
-  if (!codeDiff || codeDiff.a !== a || codeDiff.b !== b) {
+  const same = codeDiff && codeDiff.a === a && codeDiff.b === b;
+  const atTop = keep && same && codeHist.scrollTop > 0 &&
+    [...codeHist.querySelectorAll(".cdFile")].find(e => diffTop(e) + e.offsetHeight > codeHist.scrollTop);
+  if (!same) {
     codeHist.innerHTML = '<div class="cdNote">Comparing the source…</div>';
-    wholeFiles.clear();  // other versions: every file shows its changes only again
+    flipped.clear();  // other versions: every file shown as the box says again
   }
+  const def = !histOnly;
   let d;
   try {
-    d = await (await fetch(`/api/srcdiff?a=${a}&b=${b}`)).json();
-    for (const p of wholeFiles) {  // the files you opened whole stay whole
-      const w = await (await fetch(`/api/srcdiff?a=${a}&b=${b}&file=${encodeURIComponent(p)}&ctx=100000`)).json();
+    d = await (await fetch(`/api/srcdiff?a=${a}&b=${b}&ctx=${ctxOf(def)}`)).json();
+    for (const f of d.files) f.whole = def;
+    for (const p of flipped) {
+      const w = await (await fetch(`/api/srcdiff?a=${a}&b=${b}&file=${encodeURIComponent(p)}&ctx=${ctxOf(!def)}`)).json();
       const nf = w.files.find(x => x.path === p), i = d.files.findIndex(x => x.path === p);
-      if (nf && i >= 0) { nf.whole = true; d.files[i] = nf; }
+      if (nf && i >= 0) { nf.whole = !def; d.files[i] = nf; }
     }
   } catch (e) { d = { files: [], note: "The source could not be compared: the server is offline." }; }
   if (tok !== codeHistTok) return;
   codeDiff = { a, b, d };
   renderCodeDiff(); histRenderList(); drawTree();
+  if (atTop) {
+    const box = codeHist.querySelector(`.cdFile[data-path="${CSS.escape(atTop.dataset.path)}"]`);
+    if (box) codeHist.scrollTop = diffTop(box) - 10;
+  }
+}
+// A file in the tree or the Source list: its box, or in a whole file its first change, below the
+// file's name and a few lines of what comes before it.
+function showFileDiff(p) {
+  const box = codeHist.querySelector(`.cdFile[data-path="${CSS.escape(p)}"]`);
+  if (!box) return;
+  const f = codeDiff && codeDiff.d.files.find(x => x.path === p);
+  const ch = f && f.whole && box.querySelector("tr.d, tr.i, td.tx.d, td.tx.i"), name = box.querySelector(".cdName");
+  const at = diffTop(box) - 10, first = ch && diffTop(ch.closest("tr")) - name.offsetHeight - 60;
+  codeHist.scrollTop = first && first > at ? first : at;
 }
 // Side by side needs room for two columns of code; a narrower pane shows one column and says so.
 const SIDE_MIN = 620;
@@ -3628,12 +3681,11 @@ function fileDiff(f) {
   box.ondblclick = e => { const tr = e.target.closest("tr[data-line]"); if (tr && f.status !== "D") editFromDiff(f.path, +tr.dataset.line); };
   return box;
 }
-const wholeFiles = new Set();  // files shown whole, for the two versions on show
 async function wholeFile(f) {
   const { a, b } = codeDiff, whole = !f.whole;
-  if (whole) wholeFiles.add(f.path); else wholeFiles.delete(f.path);
+  if (whole !== !histOnly) flipped.add(f.path); else flipped.delete(f.path);
   let d;
-  try { d = await (await fetch(`/api/srcdiff?a=${a}&b=${b}&file=${encodeURIComponent(f.path)}&ctx=${whole ? 100000 : 3}`)).json(); } catch (e) { return; }
+  try { d = await (await fetch(`/api/srcdiff?a=${a}&b=${b}&file=${encodeURIComponent(f.path)}&ctx=${ctxOf(whole)}`)).json(); } catch (e) { return; }
   if (codeDiff.a !== a || codeDiff.b !== b) return;  // other versions on show by now
   const nf = d.files.find(x => x.path === f.path), i = codeDiff.d.files.findIndex(x => x.path === f.path);
   if (!nf || i < 0) return;

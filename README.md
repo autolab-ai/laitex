@@ -182,9 +182,12 @@ switches too.
   text, which works for prose and less well for formulas.
 - With the code shown, the History tab compares the source of the two versions picked, from their
   snapshots in git, with the changed words marked, and the files panel marks the files that
-  changed. "side by side" puts the older code on the left and the newer on the right once the pane
-  is about 620 pixels wide, as in the Code view; a narrower pane shows one column. Code + Render
-  shows the source diff next to the PDF diff. A build of your edits in the viewer is a version of its own, labelled as
+  changed with the lines each added and removed. "changed pages only" works for the code too:
+  ticked, each file shows its changed lines with a few around them; unticked, each changed file is
+  shown whole, and a click on it in the files panel scrolls to its first change. "whole file" or
+  "changes only" over a file switches that file alone. "side by side" puts the older code on the
+  left and the newer on the right once the pane is about 620 pixels wide, as in the Code view; a
+  narrower pane shows one column. Code + Render shows the source diff next to the PDF diff. A build of your edits in the viewer is a version of its own, labelled as
   yours, with its source kept in git like the agent's versions, unless the agent's version is still
   in progress; then your edits join that one, which is marked "with your edits".
 - The agent learns what you changed: the next `laitex wait` lists each file you edited, with a
