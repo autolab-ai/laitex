@@ -106,10 +106,19 @@ those files again before you change them, build on the edits, and do not undo th
 `action` is one of:
 
 - `comments`: apply the open comments listed in `comments`.
-- `commit`: commit the source changes made in this review and push them, if the project is
-  a git repository. Use a message that summarizes the edits. Do not commit the
+- `pull`: pull the latest changes from git (`git pull --rebase --autostash`, so the user's
+  uncommitted edits stay). If a conflict stops it, resolve it keeping both sides' intent where
+  you can, and ask in the chat where you cannot. Rebuild the PDF if the source changed, then
+  `laitex checkpoint doc.pdf -m "Pulled: <what came in>"` and `laitex done`. Tell the user what came
+  in, in the conversation or with `laitex say`.
+- `commit`: commit the source changes made in this review, if the project is a git repository,
+  and do not push. Use a message that summarizes the edits. Do not commit the
   `.laitex-review/` folder (it ignores itself). Then run `laitex checkpoint doc.pdf -m "<the
   commit message>"`: it finds the version the commit holds and numbers it as the next release.
+- `push`: push the current branch. Do not commit first: if there are uncommitted changes, push
+  what is committed and say what was left out. If the push is rejected because the remote moved
+  on, pull with `--rebase`, rebuild if the source changed, and push again. Say what was pushed
+  and where.
 - `fix`: fix the compile errors and warnings in `request.issues`, which the user picked in the
   Log tab. Each has `level` (`error`, `warning`, or `box` for an overfull or underfull box),
   `message`, `file` and `line` when the log names them (relative to the log's folder), `count`,

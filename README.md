@@ -108,7 +108,7 @@ build it.
 | Cmd+C | copy the selected text (also the Copy text button) |
 | Esc | cancel the comment or clear the selection |
 | Cmd+Enter | send all open comments to the agent |
-| Cmd+Shift+Enter | ask the agent to commit and push |
+| Cmd+Shift+Enter | ask the agent to commit (Pull, Commit and Push are buttons under Send) |
 | Cmd+S | save the code and recompile |
 | Cmd+K | comment on the code selected in the editor |
 | Cmd+click on the page | show that spot in the code |
@@ -204,7 +204,7 @@ itself in git. The agent does not touch that folder directly. It uses these comm
 | Command | What it does |
 | --- | --- |
 | `laitex open doc.pdf` | start the viewer (once per PDF) and open the browser; prints the URL |
-| `laitex wait doc.pdf` | block until you press Send or Commit or write in the chat, then print it as JSON |
+| `laitex wait doc.pdf` | block until you press Send, Pull, Commit or Push, or write in the chat, then print it as JSON |
 | `laitex reply doc.pdf ID "text"` | answer a comment and mark it resolved (`--status answered` to only reply) |
 | `laitex say doc.pdf "text"` | answer in the chat panel (not needed when the panel mirrors the agent's session) |
 | `laitex done doc.pdf` | tell the viewer the request is handled |
@@ -234,8 +234,8 @@ itself in git. The agent does not touch that folder directly. It uses these comm
 }
 ```
 
-`action` is `comments` (apply the open comments) or `commit` (commit and push the edits from
-this review). A comment on the code also has `file`, `line`, `end_line` and `path`, and its
+`action` is `comments` (apply the open comments), `pull` (pull from git and rebuild), `commit`
+(commit the edits from this review) or `push` (push the commits). A comment on the code also has `file`, `line`, `end_line` and `path`, and its
 `quote` is the source text. If you edited the source in the viewer since the last request,
 `edited` lists each file with a unified diff of your edits. One round looks like this:
 

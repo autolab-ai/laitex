@@ -220,6 +220,10 @@
   #treeBtn.on { background: var(--answered); border-color: var(--answered); color: #fff; }
   #filePath { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #filePath b { color: var(--fg); font-weight: 500; }
+  #gitBtns { display: flex; gap: 6px; margin-bottom: 6px; }
+  #gitBtns button { flex: 1; min-width: 0; padding: 5px; background: var(--card); color: #d97757; border: 1px solid #d97757;
+                    border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #gitBtns button:disabled { opacity: .5; cursor: default; }
   #codeTools { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
   body.v-code #code { display: flex; right: var(--side); }
   body.v-split #code { display: flex; width: var(--codew); border-right: 1px solid var(--line2); }
@@ -467,7 +471,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
   <div id="agent"><i></i><span>The agent is not listening</span></div>
   <div id="reviewTab" class="pane">
   <button id="sendBtn" style="width:100%;margin-bottom:6px;padding:6px;background:#d97757;color:#fff;border:0;border-radius:6px;cursor:pointer">Send comments</button>
-  <button id="commitBtn" style="width:100%;margin-bottom:6px;padding:5px;background:var(--card);color:#d97757;border:1px solid #d97757;border-radius:6px;cursor:pointer">Ask to commit and push</button>
+  <div id="gitBtns"><button data-act="pull">Pull</button><button data-act="commit">Commit</button><button data-act="push">Push</button></div>
   <label><input type="checkbox" id="showResolved"> show resolved</label>
   <div id="list" style="margin-top:8px"></div>
   <div id="hint">Press <kbd>h</kbd> for keyboard shortcuts.</div>
@@ -552,7 +556,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>e</kbd></td><td>edit the selected comment</td></tr>
           <tr><td><kbd>r</kbd></td><td>reply to the agent's answer on it</td></tr>
           <tr><td><kbd>Cmd+Enter</kbd></td><td>send open comments to <span class="an">the agent</span></td></tr>
-          <tr><td><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit and push</td></tr>
+          <tr><td><kbd>Cmd+Shift+Enter</kbd></td><td>ask <span class="an">the agent</span> to commit</td></tr>
         </table>
         <h4>History</h4>
         <table>
@@ -1582,7 +1586,13 @@ main.addEventListener("wheel", e => {
   setZoom(zoom * Math.exp(-e.deltaY * 0.01));
 }, { passive: false });
 const sendBtn = document.getElementById("sendBtn");
-const commitBtn = document.getElementById("commitBtn");
+// Pull, Commit and Push each ask the agent to run that git step, as Send asks it to apply the comments.
+const gitBtns = [...document.querySelectorAll("#gitBtns button")];
+const GIT = {
+  pull: ["Pull", "Pulling…", a => `Ask ${a} to pull the latest changes from git and rebuild the PDF`],
+  commit: ["Commit", "Committing…", a => `Ask ${a} to commit the edits from this review (Cmd+Shift+Enter)`],
+  push: ["Push", "Pushing…", a => `Ask ${a} to push the commits`],
+};
 function updateSendBtn() {
   const n = comments.filter(c => c.status === "open").length, t = request_;
   const tr = document.getElementById("tabReview");
@@ -1590,10 +1600,13 @@ function updateSendBtn() {
   if (n) { const b = document.createElement("span"); b.className = "cnt"; b.textContent = n; b.title = `${n} open comment${n === 1 ? "" : "s"}`; tr.append(b); }
   sendBtn.textContent = t && t.action === "comments" ? `Sent, ${agentName} is working…`
     : `Send ${n} open comment${n === 1 ? "" : "s"} to ${agentName}`;
-  commitBtn.textContent = t && t.action === "commit" ? `Commit requested, ${agentName} is working…`
-    : `Ask ${agentName} to commit and push`;
+  for (const b of gitBtns) {
+    const [label, busy, tip] = GIT[b.dataset.act];
+    b.textContent = t && t.action === b.dataset.act ? busy : label;
+    b.title = t && t.action === b.dataset.act ? `${agentName} is working on it` : tip(agentName);
+    b.disabled = !!t;
+  }
   sendBtn.disabled = !!t || n === 0; sendBtn.style.opacity = sendBtn.disabled ? .5 : 1;
-  commitBtn.disabled = !!t; commitBtn.style.opacity = t ? .5 : 1;
   if (typeof updateFixBtns === "function") updateFixBtns();
 }
 // Both buttons only leave a request for the agent, which does the work.
@@ -1610,7 +1623,7 @@ async function sendComments() {
 }
 function askCommit() { request("commit"); }
 sendBtn.onclick = sendComments;
-commitBtn.onclick = askCommit;
+for (const b of gitBtns) b.onclick = () => request(b.dataset.act);
 // ---- history: every build, and what changed between two of them ----
 // The server keeps a copy of each distinct build (Versions in cli.py). Here the words of two
 // builds are compared, and the changes are drawn over the pages: green for added words and red
