@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>laitex</title>
+<link rel="icon" href="data:,">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root { --side: 370px; color-scheme: light;
@@ -12,7 +13,10 @@
           --hl: rgba(255, 210, 0, .38); --hl-resolved: rgba(120, 120, 120, .15);
           --hl-answered: rgba(80, 140, 255, .22); --hl-active: rgba(255, 140, 0, .55);
           --ins: rgba(40, 180, 90, .32); --del: rgba(235, 60, 60, .30); --ins-fg: #18794a; --del-fg: #c6302b;
-          --mv: rgba(70, 110, 230, .24); --mv-fg: #5470c0; }
+          --mv: rgba(70, 110, 230, .24); --mv-fg: #5470c0;
+          --bar: 36px; --codew: 50vw; --code: #fdfdfd;
+          --cm-cmd: #2457b5; --cm-env: #7b3fd0; --cm-math: #b0306a; --cm-comment: #8a8f98; --cm-bracket: #6b6b6b;
+          --cm-num: #a85d00; --cm-sel: rgba(0, 90, 255, .22); --cm-sel-blur: rgba(0, 0, 0, .09); --cm-active: rgba(0, 0, 0, .035); }
   /* Dark mode only changes how the pages are shown: the page canvas is inverted with its hue
      turned back, and the raster images are laid over it from an unfiltered copy so photos keep
      their colors. The PDF and its source are never touched. */
@@ -23,14 +27,16 @@
           --hl: rgba(255, 200, 0, .4); --hl-resolved: rgba(160, 160, 160, .18);
           --hl-answered: rgba(90, 150, 255, .35); --hl-active: rgba(255, 140, 0, .6);
           --ins: rgba(60, 200, 110, .38); --del: rgba(255, 90, 90, .38); --ins-fg: #6ad99a; --del-fg: #ff8a80;
-          --mv: rgba(120, 150, 255, .30); --mv-fg: #93a8f0; }
+          --mv: rgba(120, 150, 255, .30); --mv-fg: #93a8f0; --code: #1b1b1d;
+          --cm-cmd: #82aaff; --cm-env: #c3a0ff; --cm-math: #ff8fb8; --cm-comment: #7c828c; --cm-bracket: #a8a8a8;
+          --cm-num: #f0b060; --cm-sel: rgba(80, 140, 255, .38); --cm-sel-blur: rgba(255, 255, 255, .12); --cm-active: rgba(255, 255, 255, .04); }
   :root.dark .page > canvas { filter: invert(.9) hue-rotate(180deg); }
   .imgs { display: none; position: absolute; inset: 0; pointer-events: none; }
   :root.dark .imgs { display: block; }
   .imgs canvas { position: absolute; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--fg); }
-  #main { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); overflow-y: auto; }
+  #main { position: fixed; left: 0; top: var(--bar); bottom: 0; right: var(--side); overflow-y: auto; }
   #pages { padding: 16px 20px 60vh; min-width: fit-content; }
   .page { position: relative; margin: 0 auto 14px; background: var(--page); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   .page canvas { display: block; width: 100%; height: 100%; }
@@ -60,7 +66,8 @@
   .crop { position: relative; }
   .crop > canvas { display: block; }
   :root.dark .crop > canvas { filter: invert(.9) hue-rotate(180deg); }
-  #back { position: fixed; left: 12px; top: 12px; z-index: 15; display: none; }
+  #back { position: fixed; left: 12px; top: calc(var(--bar) + 10px); z-index: 15; display: none; }
+  body.v-split #back { left: calc(var(--codew) + 12px); }
   #side { position: fixed; right: 0; top: 0; bottom: 0; width: var(--side); display: flex;
           flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); padding: 10px; }
   #list { flex: 1; overflow-y: auto; min-height: 0; }
@@ -141,9 +148,167 @@
                max-height: 3.9em; overflow: hidden; }
   button { font: inherit; padding: 3px 10px; }
   /* history: the panel's History tab picks the builds; the comparison covers the page area */
-  #hist { position: fixed; left: 0; top: 0; bottom: 0; right: var(--side); z-index: 6;
+  #hist { position: fixed; left: 0; top: var(--bar); bottom: 0; right: var(--side); z-index: 6;
           display: none; background: var(--bg); }
   #hist.open { display: block; }
+  /* The views: Render (the pages), Code (the source), or Code + Render side by side. */
+  body.v-code #main, body.v-code #hist.open { display: none; }
+  body.v-split #main, body.v-split #hist { left: var(--codew); }
+  /* three columns: the file on the left, the view in the middle, the build on the right. The side columns
+     share what is left, so the view stays centered; when the bar is narrow, the file's path gives way first
+     and the view moves left rather than under the build buttons. */
+  #bar { position: fixed; left: 0; top: 0; right: var(--side); height: var(--bar); z-index: 8; display: grid;
+         grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 0 10px; background: var(--panel);
+         border-bottom: 1px solid var(--line2); font-size: 12px; white-space: nowrap; overflow: hidden; }
+  #barL, #barR { display: flex; align-items: center; gap: 8px; }
+  #barL { min-width: 0; }
+  #barR { justify-content: flex-end; }
+  #bar { container-type: inline-size; }
+  /* a narrow bar drops the build time (a failed build still shows), then Show in PDF (Ctrl+J still works) */
+  @container (max-width: 800px) { #buildState:not(.bad) { display: none; } }
+  @container (max-width: 520px) { #syncBtn { display: none; } }
+  .seg { display: inline-flex; }
+  .seg button { font-size: 12px; padding: 2px 9px; border: 1px solid var(--line2); background: var(--card); color: var(--fg);
+                border-radius: 0; cursor: pointer; }
+  .seg button + button { border-left-width: 0; }
+  .seg button:first-child { border-radius: 5px 0 0 5px; }
+  .seg button:last-child { border-radius: 0 5px 5px 0; }
+  .seg button.on { background: #d97757; border-color: #d97757; color: #fff; }
+  #bar .tb { font-size: 12px; padding: 2px 9px; border: 1px solid var(--line2); border-radius: 5px; background: var(--card);
+             color: var(--fg); cursor: pointer; }
+  #bar .tb.main { background: #d97757; border-color: #d97757; color: #fff; }
+  #bar .tb:disabled { opacity: .5; cursor: default; }
+  #bar select { font: inherit; max-width: 260px; color: var(--fg); background: var(--card); border: 1px solid var(--line2);
+                border-radius: 5px; padding: 2px 4px; }
+  #saveState, #buildState { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  #saveState.bad, #buildState.bad { color: var(--del-fg); }
+  #buildState.bad { cursor: pointer; text-decoration: underline dotted; }
+  body.v-render #codeTools, body.v-render #syncBtn { display: none !important; }
+  #code { position: fixed; top: var(--bar); bottom: 0; left: 0; display: none; flex-direction: row; background: var(--code); }
+  #codeMain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* the files, left of the editor */
+  #tree { width: var(--treew, 210px); flex: none; display: flex; flex-direction: column; min-width: 0;
+          background: var(--panel); border-right: 1px solid var(--line); }
+  body.tree-off #tree, body.tree-off #treeGrip { display: none; }
+  #treeHead { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 4px 12px; font-size: 11px;
+              font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  #treeHead button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 6px; }
+  #treeHead button:hover { color: var(--fg); }
+  #treeList { flex: 1; overflow: auto; padding: 0 0 24px; font-size: 13px; }
+  #treeGrip { width: 6px; margin: 0 -3px; flex: none; z-index: 2; cursor: col-resize; position: relative; }
+  #treeGrip:hover, #treeGrip.on { background: rgba(217, 119, 87, .35); }
+  .ti { display: flex; align-items: center; gap: 5px; height: 24px; padding-right: 8px; cursor: pointer; white-space: nowrap; user-select: none;
+        -webkit-user-select: none; border-left: 2px solid transparent; }
+  .ti:hover { background: var(--card); }
+  .ti.on { background: rgba(217, 119, 87, .16); border-left-color: #d97757; }
+  .ti .tw { width: 10px; flex: none; text-align: center; font-size: 9px; color: var(--muted); }
+  .ti .ic { width: 10px; height: 12px; flex: none; border: 1.5px solid var(--muted); border-radius: 1.5px 4px 1.5px 1.5px; }
+  .ti .ic.tex { border-color: var(--cm-cmd); } .ti .ic.bib { border-color: var(--ins-fg); }
+  .ti .ic.sty { border-color: var(--cm-env); } .ti .ic.md { border-color: var(--cm-num); }
+  .ti .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ti.dir .nm { font-weight: 500; }
+  .ti.gone .nm { text-decoration: line-through; color: var(--muted); }
+  .ti .dirty { display: none; color: #d97757; font-size: 10px; }
+  .ti.dirty .dirty { display: inline; }
+  .ti .cc { font-size: 10px; line-height: 15px; min-width: 15px; text-align: center; padding: 0 4px; border-radius: 8px; background: #e0b400; color: #222; }
+  .ti .st { font: 600 10px ui-monospace, Menlo, monospace; width: 10px; text-align: center; }
+  .ti .st.M { color: #c9881c; } .ti .st.A { color: var(--ins-fg); } .ti .st.D { color: var(--del-fg); }
+  .ti .st.in { color: var(--muted); font-weight: normal; }
+  #treeBtn.on { background: var(--answered); border-color: var(--answered); color: #fff; }
+  #filePath { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #filePath b { color: var(--fg); font-weight: 500; }
+  #codeTools { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+  body.v-code #code { display: flex; right: var(--side); }
+  body.v-split #code { display: flex; width: var(--codew); border-right: 1px solid var(--line2); }
+  #splitGrip { display: none; position: fixed; top: var(--bar); bottom: 0; left: calc(var(--codew) - 3px); width: 7px; z-index: 7;
+               cursor: col-resize; }
+  body.v-split #splitGrip { display: block; }
+  #splitGrip:hover, #splitGrip.on { background: rgba(217, 119, 87, .35); }
+  #cmWrap { flex: 1; min-height: 0; position: relative; }
+  #cmWrap > .CodeMirror { position: absolute; inset: 0; height: auto; }
+  #cmNote { padding: 24px; color: var(--muted); line-height: 1.5; }
+  #cmNote code { font: 12px ui-monospace, Menlo, monospace; }
+  #codeBanner { display: none; padding: 5px 10px; font-size: 12px; background: var(--tip); border-bottom: 1px solid var(--tip-line); }
+  #codeBanner.on { display: flex; gap: 10px; align-items: center; }
+  #codeBanner span { flex: 1; }
+  #codeBanner a { color: var(--link); cursor: pointer; }
+  #codeHist { display: none; flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 40vh; font-size: 12px; }
+  body.hist-on #codeHist { display: block; }
+  body.hist-on #cmWrap, body.hist-on #codeBanner { display: none; }
+  /* the editor, in the page's colors */
+  .CodeMirror { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code); color: var(--fg); }
+  .CodeMirror-gutters { background: var(--panel); border-right: 1px solid var(--line); }
+  .CodeMirror-linenumber { color: var(--faint); }
+  .CodeMirror-cursor { border-left: 1.5px solid var(--fg); }
+  .CodeMirror-selected { background: var(--cm-sel-blur); }
+  .CodeMirror-focused .CodeMirror-selected { background: var(--cm-sel); }
+  .CodeMirror-line::selection, .CodeMirror-line > span::selection, .CodeMirror-line > span > span::selection { background: var(--cm-sel); }
+  .CodeMirror-activeline-background { background: var(--cm-active); }
+  .CodeMirror-matchingbracket { color: inherit !important; background: rgba(217, 119, 87, .25); border-radius: 2px; }
+  .CodeMirror-nonmatchingbracket { color: var(--del-fg) !important; }
+  .cm-s-default .cm-tag, .cm-s-default .cm-header { color: var(--cm-cmd); }
+  .cm-s-default .cm-atom, .cm-s-default .cm-link { color: var(--cm-env); }
+  .cm-s-default .cm-keyword, .cm-s-default .cm-variable-2 { color: var(--cm-math); }
+  .cm-s-default .cm-comment, .cm-s-default .cm-quote { color: var(--cm-comment); font-style: italic; }
+  .cm-s-default .cm-bracket { color: var(--cm-bracket); }
+  .cm-s-default .cm-number, .cm-s-default .cm-string { color: var(--cm-num); }
+  .cm-s-default .cm-error { color: var(--del-fg); }
+  .CodeMirror-dialog { background: var(--panel); color: var(--fg); border-color: var(--line2) !important; }
+  .cm-searching { background: none !important; outline: 1.5px solid rgba(80, 140, 255, .75); border-radius: 2px; }  /* not a comment's yellow */
+  .CodeMirror-dialog input { color: var(--fg); font: inherit; }
+  .CodeMirror-dialog button { font-size: 12px; }
+  /* comments on the code: highlights like those on the page, and a dot in the margin */
+  .cmt { background: var(--hl); border-radius: 2px; cursor: pointer; }
+  .cmt.answered { background: var(--hl-answered); }
+  .cmt.resolved { background: var(--hl-resolved); }
+  .cmt.active, .cmt.pending { background: var(--hl-active); }
+  .cmt-gutter { width: 12px; }
+  .cmt-dot { width: 7px; height: 7px; margin: 6px 0 0 3px; border-radius: 50%; background: #e0b400; cursor: pointer; }
+  .cmt-dot.answered { background: var(--answered); }
+  .cmt-dot.resolved { background: var(--line2); }
+  .cmt-dot.active { background: #d97757; }
+  @keyframes flash { from { background: var(--ins); } to { background: transparent; } }
+  .cm-flash { animation: flash 2.6s ease-out; }
+  #codeChip { position: fixed; display: none; z-index: 9; font-size: 12px; padding: 2px 10px; border-radius: 12px;
+              border: 1px solid #d97757; background: var(--card); color: #d97757; box-shadow: 0 2px 8px rgba(0,0,0,.18); cursor: pointer; }
+  /* a spot shown in the PDF, for a line of the code */
+  .syncl { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+  .syncl i { position: absolute; border-radius: 2px; background: rgba(217, 119, 87, .35); animation: syncfade 2.8s ease-out forwards; }
+  @keyframes syncfade { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
+  /* the source diff in the History tab */
+  .cdHead { color: var(--muted); margin: 0 0 10px; }
+  .cdFile { margin: 0 0 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); overflow: hidden; }
+  .cdName { display: flex; gap: 8px; align-items: baseline; padding: 5px 9px; background: var(--panel); border-bottom: 1px solid var(--line);
+            font: 12px ui-monospace, Menlo, monospace; position: sticky; top: -10px; z-index: 1; }
+  .cdName b { font-weight: 600; overflow-wrap: anywhere; }
+  .cdName .p { color: var(--ins-fg); } .cdName .m { color: var(--del-fg); }
+  .cdName a { margin-left: auto; color: var(--link); cursor: pointer; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  .cdName a + a { margin-left: 0; }
+  .cdHunk { padding: 2px 9px; color: var(--muted); background: var(--panel); font: 11px ui-monospace, Menlo, monospace;
+            border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cdT { border-collapse: collapse; width: 100%; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cdT td { padding: 0 6px; vertical-align: top; }
+  .cdT td.ln { width: 1%; color: var(--faint); text-align: right; user-select: none; -webkit-user-select: none; white-space: nowrap; }
+  .cdT td.tx { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cdT tr.d td.tx { background: rgba(235, 60, 60, .10); }
+  .cdT tr.i td.tx { background: rgba(40, 180, 90, .11); }
+  .cdT tr.d td.tx::before { content: "−"; color: var(--del-fg); margin-right: 6px; }
+  .cdT tr.i td.tx::before { content: "+"; color: var(--ins-fg); margin-right: 6px; }
+  .cdT tr.c td.tx::before { content: " "; margin-right: 6px; }
+  .cdS { table-layout: fixed; }
+  .cdS col.ln { width: 3.6em; }
+  .cdS td.tx { width: 50%; }
+  .cdS td.tx.d { background: rgba(235, 60, 60, .10); }
+  .cdS td.tx.i { background: rgba(40, 180, 90, .11); }
+  .cdS td.tx.e { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line) 5px 6px); }
+  .cdS td.ln + td.tx { border-right: 1px solid var(--line); }
+  .cdS td.tx::before { content: none !important; }
+  .cdCols { display: grid; grid-template-columns: 1fr 1fr; font-size: 11px; color: var(--muted); padding: 3px 9px; border-bottom: 1px solid var(--line); }
+  .cdT del { background: var(--del); text-decoration: none; border-radius: 2px; }
+  .cdT ins { background: var(--ins); text-decoration: none; border-radius: 2px; }
+  .cdT tr:hover td.ln { color: var(--fg); }
+  .cdNote { color: var(--muted); padding: 16px 4px; line-height: 1.5; }
+  .c .q.code { font: 11.5px ui-monospace, Menlo, monospace; font-style: normal; white-space: pre-wrap; }
   #histPages { position: absolute; inset: 0; overflow: auto; padding: 16px 20px 60vh; }
   #histPages > .note { color: var(--muted); padding: 20px; }
   #histCtl { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 8px;
@@ -244,7 +409,39 @@ applyTheme();
 try { const w = +localStorage.getItem("side"); if (w) document.documentElement.style.setProperty("--side", w + "px"); } catch (e) {}
 </script>
 </head>
-<body>
+<body class="v-render">
+<div id="bar">
+  <span id="barL">
+    <span id="codeTools">
+      <button id="treeBtn" class="tb" title="Show or hide the files (Cmd+B)">Files</button>
+      <span id="filePath"></span>
+      <span id="saveState"></span>
+    </span>
+  </span>
+  <span class="seg" id="viewSeg">
+    <button data-view="render" title="The PDF (Ctrl+V switches the view)">Render</button><button data-view="code" title="The source, to edit and comment on">Code</button><button data-view="split" title="The source next to the PDF">Code + Render</button>
+  </span>
+  <span id="barR">
+    <button id="syncBtn" class="tb" title="Show the line at the cursor in the PDF (Ctrl+J). Cmd+click the PDF for the other way.">Show in PDF</button>
+    <span id="buildState"></span>
+    <label id="autoLbl" title="Build the PDF a moment after each save"><input type="checkbox" id="autoBox"> auto</label>
+    <button id="buildBtn" class="tb main" title="Save and build the PDF (Cmd+S)">Recompile</button>
+  </span>
+</div>
+<div id="code">
+  <div id="tree">
+    <div id="treeHead"><span>Files</span><button id="treeHide" title="Hide the files (Cmd+B)">&laquo;</button></div>
+    <div id="treeList"></div>
+  </div>
+  <div id="treeGrip" title="Drag to resize"></div>
+  <div id="codeMain">
+    <div id="codeBanner"></div>
+    <div id="cmWrap"><div id="cmNote">Loading the editor…</div></div>
+    <div id="codeHist"></div>
+  </div>
+</div>
+<div id="splitGrip" title="Drag to resize; double-click to split in the middle"></div>
+<button id="codeChip" title="Comment on the selected code (Cmd+K)">Comment</button>
 <div id="main"><div id="pages"></div></div>
 <div id="hist"><div id="histPages"></div></div>
 <div id="sideGrip" title="Drag to resize; double-click for the default width"></div>
@@ -285,7 +482,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
       <span>show</span><select id="histB" title="The build to show"></select>
       <span>against</span><select id="histA" title="The build to compare it with"></select>
       <div class="row">
-        <span class="seg"><button id="histSingle" title="The newer build, with added words in green and removals marked in red">changes</button><button id="histSide" title="Both builds side by side">side by side</button></span>
+        <span class="seg"><button id="histSingle" title="The newer version with its changes marked: added words in green, removals in red (the code: one column)">changes</button><button id="histSide" title="The older and the newer version next to each other, the pages and the code">side by side</button></span>
         <label><input type="checkbox" id="histOnly"> changed pages only</label>
         <label title="Text that only moved, for example when a paragraph got shorter, in blue (m)"><input type="checkbox" id="histMovedBox" checked> show moved text</label>
         <label title="One row per major version, showing everything since its committed build (c)"><input type="checkbox" id="histGroupBox"> group by major version</label>
@@ -322,6 +519,18 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
           <tr><td><kbd>d</kbd></td><td>dark mode</td></tr>
           <tr><td><kbd><span class="altkey">Alt</span>+&larr;</kbd></td><td>back after following a link</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>cancel, close, back to Review</td></tr>
+          <tr><td><kbd><span class="tabmod">Ctrl</span>+V</kbd></td><td>Render, Code, Code + Render</td></tr>
+          <tr><td><kbd>Cmd+S</kbd></td><td>save and recompile</td></tr>
+        </table>
+        <h4>Code</h4>
+        <table>
+          <tr><td>select code, <kbd>Cmd+K</kbd></td><td>comment on it (or the Comment button)</td></tr>
+          <tr><td><kbd>Cmd</kbd>+click the PDF</td><td>show that spot in the code</td></tr>
+          <tr><td><kbd><span class="tabmod">Ctrl</span>+J</kbd></td><td>show the line at the cursor in the PDF</td></tr>
+          <tr><td><kbd>Cmd+B</kbd></td><td>show or hide the files</td></tr>
+          <tr><td><kbd>Cmd+F</kbd> <kbd>Cmd+G</kbd></td><td>find, find next</td></tr>
+          <tr><td><kbd>Cmd+<span class="altkey">Alt</span>+F</kbd></td><td>replace</td></tr>
+          <tr><td><kbd>Cmd +</kbd> <kbd>Cmd &minus;</kbd></td><td>text size, while typing in the code</td></tr>
         </table>
         <h4>Chat</h4>
         <table>
@@ -386,7 +595,7 @@ let doc = null, sizes = [], gen = 0;  // sizes: unscaled page sizes in PDF point
 
 let zoom = 1;
 try { zoom = parseFloat(localStorage.getItem("zoom")) || 1; } catch (e) {}
-function fitWidth() { return Math.max(500, Math.min((main.clientWidth || window.innerWidth - 340) - 40, 1100)); }
+function fitWidth() { return Math.max(260, Math.min((main.clientWidth || window.innerWidth - 340) - 40, 1100)); }
 function scaleFor(n) { return fitWidth() * zoom / sizes[n - 1].w; }
 
 // A place in the document: the page at the top of the view, and how far down and across that
@@ -419,8 +628,14 @@ function viewTo(sc, pages, v) {
   sc.scrollLeft += r.left + v.fx * r.width - box.left;
   sc._put = { top: sc.scrollTop, left: sc.scrollLeft, v };
 }
-function anchor() { return viewOf(main, pagesEl.children) || { n: 1, fy: 0, fx: 0 }; }
-function restore(a) { viewTo(main, pagesEl.children, a); }
+// While the Code view hides the pages, the place they were left at stands for them.
+let pane = "render", hiddenPlace = null;
+const renderShown = () => pane !== "code", codeShown = () => pane !== "render";
+function anchor() {
+  if (!renderShown()) return hiddenPlace || { n: 1, fy: 0, fx: 0 };
+  return viewOf(main, pagesEl.children) || { n: 1, fy: 0, fx: 0 };
+}
+function restore(a) { if (!renderShown()) hiddenPlace = a; else viewTo(main, pagesEl.children, a); }
 // The reading position also survives reloading the page: it is kept in this browser, per PDF,
 // as the zoom is.
 let viewKey = null, saveTimer;
@@ -436,8 +651,7 @@ window.addEventListener("pagehide", saveView);
 
 // Resize page boxes to the current zoom. The old canvas is stretched until it is
 // re-rendered, and the text layer follows the --scale-factor variable, so this is instant.
-function layout() {
-  const a = anchor();
+function layout(a = anchor()) {
   for (const div of pagesEl.children) {
     const n = +div.dataset.page, sc = scaleFor(n);
     div.style.width = sizes[n - 1].w * sc + "px";
@@ -800,7 +1014,7 @@ async function renderPage(div, d, g) {
 // Render the pages near the viewport, nearest first.
 let renderQueued = false;
 async function renderVisible() {
-  if (renderQueued || !doc) return;
+  if (renderQueued || !doc || !renderShown()) return;
   renderQueued = true;
   const g = gen, d = doc;
   try {
@@ -918,7 +1132,7 @@ function commonEnd(a, b) { let n = 0; while (n < a.length && n < b.length && a[a
 function commonStart(a, b) { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; }
 let reanchoring = false;
 async function reanchor(d) {
-  const todo = comments.filter(c => c.status !== "resolved" && c.quote && !c.vn && !c.more);  // not on older versions or across pages
+  const todo = comments.filter(c => c.status !== "resolved" && c.quote && !c.vn && !c.more && !c.file);  // not on older versions, across pages, or on the code
   if (reanchoring || !todo.length) return;
   reanchoring = true;
   try {
@@ -973,12 +1187,13 @@ function drawRects(hl, c) {
   }
 }
 function drawHighlights() {
+  drawCodeMarks();
   pagesEl.querySelectorAll(".hl").forEach(h => h.replaceChildren());
   const all = pending ? [...comments, { ...pending, id: "__pending", status: "pending" }] : comments;
   for (const c of all) {
     // Resolved text has usually been rewritten, so its old boxes are only drawn when selected.
     if (c.status === "resolved" && c.id !== activeId) continue;
-    if (c.vn) continue;  // about an older version: drawn on its History pages
+    if (c.vn || c.file) continue;  // about an older version (drawn on its History pages), or on the code
     for (const part of [{ page: c.page, rects: c.rects }, ...(c.more || [])]) {
       const hl = pagesEl.querySelector(`.page[data-page="${part.page}"] .hl`);
       if (hl) drawRects(hl, { ...c, rects: part.rects });
@@ -990,7 +1205,7 @@ function drawHighlights() {
     const hl = div.querySelector(".hl"), vn = div.dataset.side === "A" ? cmp.a : cmp.b;
     hl.replaceChildren();
     for (const c of all) {
-      if ((c.vn || latest) !== vn) continue;
+      if ((c.vn || latest) !== vn || c.file) continue;
       if (c.status === "resolved" && c.id !== activeId) continue;
       for (const part of [{ page: c.page, rects: c.rects }, ...(c.more || [])])
         if (part.page === +div.dataset.page) drawRects(hl, { ...c, rects: part.rects });
@@ -1000,24 +1215,27 @@ function drawHighlights() {
 
 function esc(s) { return (s || "").replace(/[&<>]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch])); }
 
+// Open comments first; those on the pages by page, then those on the code by file and line.
+const byPlace = (a, b) => (a.status === "resolved") - (b.status === "resolved") || !!a.file - !!b.file ||
+  (a.file ? a.file.localeCompare(b.file) || a.line - b.line : a.page - b.page);
+const whereOf = c => c.file ? `${c.file}:${c.line}` : `p.${c.page}`;
 function drawList() {
   const show = document.getElementById("showResolved").checked;
   const list = document.getElementById("list");
-  const items = comments.filter(c => show || c.status !== "resolved")
-    .sort((a, b) => (a.status === "resolved") - (b.status === "resolved") || a.page - b.page);
+  const items = comments.filter(c => show || c.status !== "resolved").sort(byPlace);
   updateSendBtn();
-  list.innerHTML = items.length ? "" : "<div style='color:var(--faint)'>Select text in the PDF to add a comment.</div>";
+  list.innerHTML = items.length ? "" : "<div style='color:var(--faint)'>Select text in the PDF or the code to add a comment.</div>";
   for (const c of items) {
     const el = document.createElement("div");
-    el.className = "c " + c.status;
+    el.className = "c " + c.status; el.dataset.id = c.id;
     const ed = inlineEdit && inlineEdit.id === c.id, editing = ed && inlineEdit.mode === "edit", replying = ed && inlineEdit.mode === "reply";
     // The conversation after the comment: the agent's replies and your follow-ups.
     const thread = c.thread || (c.reply ? [{ role: "agent", text: c.reply }] : []);
-    el.innerHTML = `<div class="q">${esc(c.quote)}</div>` +
+    el.innerHTML = `<div class="q${c.file ? " code" : ""}">${esc(c.quote)}</div>` +
       (editing ? `<textarea class="te" rows="2"></textarea>` : `<div class="t">${esc(c.comment)}</div>`) +
       thread.map(m => `<div class="${m.role === "agent" ? "r" : "u"}">${esc(m.text)}</div>`).join("") +
       (replying ? `<textarea class="te rp" rows="2" placeholder="Reply. Enter: save · Cmd+Enter: save and send · Esc: cancel"></textarea>` : "") +
-      `<div class="meta">p.${c.page}${c.version ? " of " + esc(c.version) : ""} · ${c.status}` +
+      `<div class="meta">${esc(whereOf(c))}${c.version ? " of " + esc(c.version) : ""} · ${c.status}` +
       (ed ? ` <a data-act="save">save</a> <a data-act="cancel">cancel</a>`
           : (thread.length ? ` <a data-act="reply">reply</a>` : "") +
             ` <a data-act="toggle">${c.status === "resolved" ? "reopen" : "resolve"}</a>` +
@@ -1040,6 +1258,7 @@ function drawList() {
         return;
       }
       activeId = c.id; drawHighlights();
+      if (c.file) return showCodeComment(c);
       const p = pagesEl.querySelector(`.page[data-page="${c.page}"]`);
       if (p) {
         const y = c.rects && c.rects.length ? c.rects[0][1] : 0;
@@ -1057,6 +1276,7 @@ async function loadComments() {
     lastCommentsJson = txt; comments = JSON.parse(txt);
     if (!inlineEdit) drawList();  // redrawing would replace the comment being edited
     drawHighlights();
+    if (cm) drawTree();
   }
 }
 
@@ -1199,23 +1419,29 @@ document.addEventListener("mouseup", ev => {
     openPop(per.length > 1 ? boxes[boxes.length - 1] : range.getBoundingClientRect());
   }, 0);
 });
-function closePop() { pop.style.display = "none"; pending = null; drawHighlights(); }
+function closePop() {
+  const code = pending && pending.file;
+  pop.style.display = "none"; pending = null; drawHighlights();
+  if (code) { drawCodeMarks(); if (cm) cm.focus(); }
+}
 document.getElementById("popCancel").onclick = closePop;
 async function savePop() {
   const text = popText.value.trim();
   if (!pending || !text) return closePop();
-  await fetch("/api/comments", { method: "POST", headers: H,
-    body: JSON.stringify({ ...pending, comment: text }) });
-  closePop(); window.getSelection().removeAllRanges(); loadComments();
+  const item = { ...pending, comment: text };  // the box may close while this is sent
+  await fetch("/api/comments", { method: "POST", headers: H, body: JSON.stringify(item) });
+  closePop(); if (!item.file) window.getSelection().removeAllRanges();
+  lastCommentsJson = ""; loadComments();
 }
 document.getElementById("popSave").onclick = savePop;
 // Ask about the selection in the chat: the message carries the selected text and where it is.
 async function askPop() {
   const text = popText.value.trim();
   if (!pending || !text) return closePop();
-  const { page, quote, context, version } = pending;
-  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page, quote, context, version }) });
-  closePop(); window.getSelection().removeAllRanges();
+  const { page, quote, context, version, file, line, end_line } = pending;
+  await saveAll();
+  await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page, quote, context, version, file, line, end_line }) });
+  closePop(); if (!file) window.getSelection().removeAllRanges();
   if (sideTab !== "chat") setTab("chat");
   chatLog.scrollTop = chatLog.scrollHeight; pollChat();
 }
@@ -1249,12 +1475,14 @@ popText.addEventListener("keydown", async e => {
       pending && popText.selectionStart === popText.selectionEnd) { e.preventDefault(); return copyQuote(); }
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); await savePop(); sendComments(); }
   else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); sideTab === "chat" ? askPop() : savePop(); }
-  else if (e.key === "Escape") { e.stopPropagation(); closePop(); window.getSelection().removeAllRanges(); }
+  else if (e.key === "Escape") { e.stopPropagation(); const code = pending && pending.file; closePop(); if (!code) window.getSelection().removeAllRanges(); }
 });
 // Elsewhere: Esc clears the selection, Cmd+Enter sends all open comments.
 window.addEventListener("keydown", e => {
   if (e.target === popText) return;
-  if (e.key === "Escape") { closePop(); window.getSelection().removeAllRanges(); }
+  if (e.key === "s" && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { e.preventDefault(); compile(); return; }
+  // In the code editor the page's selection is the editor's, so Esc leaves it alone there.
+  if (e.key === "Escape" && !inCode(e.target)) { closePop(); window.getSelection().removeAllRanges(); }
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey) { e.preventDefault(); askCommit(); return; }
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendComments(); }
 });
@@ -1267,7 +1495,7 @@ async function poll() {
       document.title = st.name; document.getElementById("docname").textContent = st.name;
       document.getElementById("docname").title = st.pdf;
     }
-    if (st.pdf) viewKey = "view:" + st.pdf;
+    if (st.pdf) { viewKey = "view:" + st.pdf; pdfPath = st.pdf; }
     agentName = st.agent_name || "the agent";
     document.querySelectorAll(".an").forEach(s => s.textContent = agentName);
     if (histOpen && JSON.stringify(st.request) !== JSON.stringify(request_)) { request_ = st.request; histRenderList(); }
@@ -1277,6 +1505,8 @@ async function poll() {
     ag.querySelector("span").textContent = cap(agentName) + (st.listening ? " is listening" : " is not listening");
     ag.title = st.listening ? "" : "Ask your agent to review this PDF with laitex; requests wait here until it does.";
     updateSendBtn();
+    updateBuild(st.build);
+    if (codeShown() && cm) refreshFiles();
     updateLogTab(st.log);
     const sig = st.log ? `${st.log.path}|${st.log.mtime}` : "";
     if (sig !== logSig) { logSig = sig; if (sideTab === "log") loadLog(); else logData = null; }
@@ -1293,8 +1523,11 @@ async function poll() {
 // Pages fit the space left of the panel: after the window or the panel changes size, lay them
 // out again and render them at the new size.
 function relayout() {
+  applyCodeW();
   gen++; layout(); renderVisible();
   if (histOpen && cmp) { histToken++; histLayout(); }
+  resizeDiff();
+  if (cm && codeShown()) cm.refresh();
 }
 let resizeTimer;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(relayout, 200); });
@@ -1335,9 +1568,10 @@ document.getElementById("zoomLabel").textContent = Math.round(zoom * 100) + "%";
 // Cmd/Ctrl +/-/0 and trackpad pinch re-render the PDF sharply instead of scaling pixels.
 window.addEventListener("keydown", e => {
   if (!(e.metaKey || e.ctrlKey)) return;
-  if (e.key === "=" || e.key === "+") { e.preventDefault(); setZoom(zoom * 1.2); }
-  else if (e.key === "-") { e.preventDefault(); setZoom(zoom / 1.2); }
-  else if (e.key === "0") { e.preventDefault(); setZoom(1); }
+  const code = pane === "code" || inCode(e.target);
+  if (e.key === "=" || e.key === "+") { e.preventDefault(); code ? codeFont(1) : setZoom(zoom * 1.2); }
+  else if (e.key === "-") { e.preventDefault(); code ? codeFont(-1) : setZoom(zoom / 1.2); }
+  else if (e.key === "0") { e.preventDefault(); code ? codeFont(0) : setZoom(1); }
 });
 main.addEventListener("wheel", e => {
   if (!e.ctrlKey) return;
@@ -1359,8 +1593,9 @@ function updateSendBtn() {
   commitBtn.disabled = !!t; commitBtn.style.opacity = t ? .5 : 1;
   if (typeof updateFixBtns === "function") updateFixBtns();
 }
-// Both buttons only leave a request for the agent; the viewer never edits files or runs git.
+// Both buttons only leave a request for the agent, which does the work.
 async function request(action) {
+  await saveAll();  // the agent works on the text as you left it
   request_ = await (await fetch("/api/request", { method: "POST", headers: H,
                                                   body: JSON.stringify({ action }) })).json();
   updateSendBtn();
@@ -1679,6 +1914,7 @@ async function fillStats() {
 }
 async function histShow() {
   const tok = ++histToken, b = +histB.value, a = +histA.value;
+  codeHistShow();
   if (histObs) histObs.disconnect();
   histKeep();
   histPages.replaceChildren(); cmp = null;
@@ -1980,6 +2216,10 @@ function verRow(v, latest, first, sel, against, sub) {
   const name = document.createElement("b"); name.textContent = nameOf(v.n) + (v.n === latest ? " (current)" : "");
   if (!v.sealed) { const ip = document.createElement("i"); ip.textContent = " in progress"; name.append(ip); }
   if (v.release) { const r = document.createElement("span"); r.className = "rel"; r.textContent = " committed"; name.append(r); }
+  if ((v.by === "you" && !v.sealed) || v.mixed) {  // a sealed version of yours says so in its label
+    const r = document.createElement("span"); r.className = "rel"; r.style.color = "var(--muted)";
+    r.textContent = v.by === "you" ? " your edits" : " with your edits"; name.append(r);
+  }
   const when = document.createElement("span");
   when.textContent = vTime(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   t.append(name, when);
@@ -2017,6 +2257,19 @@ function histDetails() {
   const add = (tag, text, cls) => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; box.append(e); return e; };
   const grouped = histGroup && histGroups().some(g => g.base === cmp.a && g.last === cmp.b && g.base !== g.last);
   if (cmp.a && cmp.a !== prevOf(cmp.b) && !grouped) add("div", `compared with ${nameOf(cmp.a)}`, "note");
+  const cd = codeDiff && codeDiff.a === cmp.a && codeDiff.b === cmp.b && codeShown() ? codeDiff.d : null;
+  if (cd && cd.files.length) {  // the source files it changed; a click shows the file in the code diff
+    add("h4", "Source");
+    for (const f of cd.files) {
+      const e = add("div", "", "hk");
+      const n = document.createElement("span"); n.className = "pg"; n.textContent = f.status === "A" ? "new" : f.status === "D" ? "deleted" : "";
+      const p = document.createElement("span"); p.textContent = f.path + " ";
+      const pl = document.createElement("ins"); pl.textContent = "+" + f.add;
+      const mi = document.createElement("del"); mi.style.textDecoration = "none"; mi.textContent = " −" + f.del;
+      e.append(n, p, pl, mi);
+      e.onclick = () => { const t = codeHist.querySelector(`.cdFile[data-path="${CSS.escape(f.path)}"]`); if (t) codeHist.scrollTop = t.offsetTop - 10; };
+    }
+  }
   const vs = histVersions, iB = vs.findIndex(v => v.n === cmp.b), iA = vs.findIndex(v => v.n === cmp.a);
   const from = vTime(vs[iA >= 0 ? iA + 1 : iB]), to = vs[iB + 1] ? vTime(vs[iB + 1]) : new Date(8.64e15);
   const answered = comments.filter(c => c.replied && c.reply && (t => t >= from && t < to)(new Date(c.replied.replace(" ", "T"))));
@@ -2063,6 +2316,9 @@ async function setHist(open) {
   if (open) view = anchor(); else histKeep();
   histOpen = open;
   hist.classList.toggle("open", open);
+  if (open) codeHide();
+  document.body.classList.toggle("hist-on", open);
+  if (!open) { codeShow(); if (cm) drawTree(); }
   clearInterval(histPoll);
   if (!open) {
     histToken++; if (histObs) histObs.disconnect(); histPages.replaceChildren(); cmp = null; tip.style.display = "none";
@@ -2105,7 +2361,7 @@ document.getElementById("histGroupBox").onchange = e => {
 };
 document.getElementById("histOnly").onchange = e => { histOnly = e.target.checked; try { localStorage.setItem("histOnly", histOnly ? "1" : "0"); } catch (err) {} if (cmp) histLayout(); };
 histPages.addEventListener("scroll", () => { tip.style.display = "none"; saveSoon(); });
-window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) setTab("review"); });
+window.addEventListener("keydown", e => { if (histOpen && e.key === "Escape" && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName) && !inCode(e.target)) setTab("review"); });
 
 // ---- chat with the agent ----
 // When laitex can read the agent's session transcript, the panel mirrors that session, so it
@@ -2231,6 +2487,7 @@ async function sendChat() {
   const text = chatInput.value.trim();
   if (!text) return;
   chatInput.value = "";
+  await saveAll();  // the agent reads the files as you left them
   await fetch("/api/chat", { method: "POST", headers: H, body: JSON.stringify({ text, page: anchor().n }) });
   chatLog.scrollTop = chatLog.scrollHeight;
   pollChat();
@@ -2242,7 +2499,7 @@ chatInput.addEventListener("keydown", e => {
 });
 // ---- log: errors, warnings and bad boxes of the last build ----
 // The server reads the build's log (compile_log in cli.py). The fix buttons only leave a request
-// for the agent, naming the issues; the viewer never edits files.
+// for the agent, naming the issues.
 const logList = document.getElementById("logList"), fixAllBtn = document.getElementById("fixAllBtn");
 const LOG_NAMES = { error: ["error", "errors"], warning: ["warning", "warnings"], box: ["bad box", "bad boxes"] };
 let logData = null, logSig = null, logSel = null;
@@ -2250,8 +2507,11 @@ const logOpen = new Set();  // the issues whose log lines are shown
 const logShow = { error: true, warning: true, box: true };
 try { Object.assign(logShow, JSON.parse(localStorage.getItem("logShow") || "{}")); } catch (e) {}
 const logShown = () => logData ? logData.items.filter(it => logShow[it.level]) : [];
+let buildRun = null;  // the last build of the build command, with its output
 async function loadLog() {
-  try { logData = await (await fetch("/api/log")).json(); } catch (e) { return; }
+  try {
+    [logData, buildRun] = await Promise.all([(await fetch("/api/log")).json(), (await fetch("/api/build")).json()]);
+  } catch (e) { return; }
   renderLog();
 }
 function updateLogTab(info) {  // the tab's badges: errors in red, warnings in amber
@@ -2297,6 +2557,19 @@ function renderLog() {
   const items = logShown(), top = logList.scrollTop;
   if (!items.some(it => it.id === logSel)) logSel = null;
   logList.replaceChildren();
+  if (buildRun && buildRun.finished && !buildRun.ok && !buildRun.running) {  // the command itself failed
+    const card = document.createElement("div"); card.className = "issue error" + (logOpen.has("build") ? " open" : "");
+    const row = document.createElement("div"); row.className = "row";
+    const lvl = document.createElement("span"); lvl.className = "lvl"; lvl.textContent = "build";
+    const where = document.createElement("span"); where.className = "where"; where.textContent = buildRun.cmd || "";
+    row.append(lvl, where);
+    const msg = document.createElement("div"); msg.className = "msg";
+    msg.textContent = `The build command failed (exit ${buildRun.code}) at ${new Date(buildRun.finished * 1000).toLocaleTimeString()}. Click for its output.`;
+    const pre = document.createElement("pre"); pre.textContent = (buildRun.output || "").split("\n").slice(-80).join("\n");
+    card.append(row, msg, pre);
+    card.onclick = () => { if (logOpen.has("build")) logOpen.delete("build"); else logOpen.add("build"); card.classList.toggle("open"); };
+    logList.append(card);
+  }
   if (logData.exists && !items.length) {
     const d = document.createElement("div"); d.className = "none";
     d.textContent = logData.items.length ? "Nothing shown: turn on a filter above." : "No errors or warnings in the last build.";
@@ -2354,6 +2627,1026 @@ async function askFix(ids) {
 }
 fixAllBtn.onclick = () => askFix(logShown().map(it => it.id));
 document.querySelectorAll("#logFilters button").forEach(b => { b.onclick = () => toggleLevel(b.dataset.level); });
+// ---- the code: edit the source, comment on it, and go between it and the PDF ----
+// The editor is CodeMirror 5, loaded from cdnjs the first time the code is shown. Each file is a
+// CodeMirror document, saved a moment after you stop typing. A save names the state of the file it
+// started from (a hash of its bytes); if the file changed on disk in the meantime, the agent edited
+// it, and the server sends the new text back instead of writing. The two are then merged line by
+// line, as git merges branches, and saved again. A change on disk while you are not typing is
+// taken in the same way, and its lines flash.
+const CM = "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/";
+const cmWrap = document.getElementById("cmWrap"), codeHist = document.getElementById("codeHist");
+const treeEl = document.getElementById("treeList"), filePathEl = document.getElementById("filePath");
+const saveStateEl = document.getElementById("saveState");
+const buildBtn = document.getElementById("buildBtn"), buildStateEl = document.getElementById("buildState");
+const autoBox = document.getElementById("autoBox"), autoLbl = document.getElementById("autoLbl");
+const syncBtn = document.getElementById("syncBtn"), chip = document.getElementById("codeChip");
+const banner = document.getElementById("codeBanner");
+let cm = null, cmLoading = null, fileList = [], mainFile = null, curPath = null, hasBuild = false, hasSync = false, pdfPath = "";
+const files = new Map();  // path -> {doc, hash, saved, mtime, size, dirty, saving, marks, ...}
+const inCode = t => !!(t && t.closest && t.closest("#code"));
+let autoBuild = true, codeSize = 13, codeFrac = 0.5;
+try {
+  autoBuild = localStorage.getItem("autoBuild") !== "0";
+  codeSize = +localStorage.getItem("codeSize") || 13;
+  codeFrac = parseFloat(localStorage.getItem("codeFrac")) || 0.5;
+} catch (e) {}
+autoBox.checked = autoBuild;
+
+function loadAsset(path) {
+  return new Promise((ok, fail) => {
+    const css = path.endsWith(".css"), el = document.createElement(css ? "link" : "script");
+    if (css) { el.rel = "stylesheet"; el.href = CM + path; } else el.src = CM + path;
+    el.onload = ok; el.onerror = () => fail(new Error("could not load " + CM + path));
+    // CodeMirror's styles go before the viewer's, so the viewer's colors win
+    if (css) document.head.insertBefore(el, document.querySelector("head style")); else document.head.appendChild(el);
+  });
+}
+async function loadCM() {
+  await Promise.all(["codemirror.min.css", "addon/dialog/dialog.min.css", "codemirror.min.js"].map(loadAsset));
+  await Promise.all(["mode/stex/stex.min.js", "mode/markdown/markdown.min.js", "addon/dialog/dialog.min.js",
+    "addon/search/searchcursor.min.js", "addon/search/search.min.js", "addon/search/jump-to-line.min.js",
+    "addon/edit/matchbrackets.min.js", "addon/edit/closebrackets.min.js", "addon/selection/active-line.min.js"].map(loadAsset));
+}
+function modeFor(path) {
+  const ext = (/\.[^./]+$/.exec(path) || [""])[0].toLowerCase();
+  if ([".md", ".markdown", ".qmd", ".rmd"].includes(ext)) return "markdown";
+  if ([".tex", ".ltx", ".latex", ".sty", ".cls", ".dtx", ".ins", ".bib", ".bbx", ".cbx", ".tikz", ".pgf", ".bst"].includes(ext)) return "stex";
+  return null;
+}
+function ensureEditor() {
+  if (!cmLoading) cmLoading = (async () => {
+    await loadCM();
+    if (!pdfPath) pdfPath = (await (await fetch("/api/state")).json()).pdf || "";
+    cmWrap.replaceChildren();
+    const mod = isMac ? "Cmd" : "Ctrl";
+    cm = CodeMirror(cmWrap, {
+      value: "", lineNumbers: true, lineWrapping: true, matchBrackets: true, autoCloseBrackets: "()[]{}",
+      styleActiveLine: true, indentUnit: 2, tabSize: 4, inputStyle: "contenteditable", spellcheck: true,
+      gutters: ["CodeMirror-linenumbers", "cmt-gutter"], viewportMargin: 40,
+      extraKeys: {
+        [mod + "-K"]: () => startCodeComment(),
+        Tab: c => c.somethingSelected() ? c.execCommand("indentMore") : c.execCommand(c.getOption("indentWithTabs") ? "insertTab" : "insertSoftTab"),
+        "Shift-Tab": "indentLess",
+        Esc: c => { c.execCommand("clearSearch"); return CodeMirror.Pass; },  // and keep one cursor
+      },
+    });
+    applyCodeFont();
+    cm.on("cursorActivity", onCursor);
+    cm.on("scroll", hideChip);
+    cm.on("blur", () => { setTimeout(() => { if (cm && !cm.hasFocus()) hideChip(); }, 200); saveAll(); });
+    cm.on("mousedown", (c, e) => { const el = e.target.closest && e.target.closest("[data-cid]"); if (el) pickComment(el.dataset.cid); });
+    cm.on("gutterClick", (c, line, gutter, e) => {
+      const el = gutter === "cmt-gutter" && e.target.closest("[data-cid]");
+      if (el) pickComment(el.dataset.cid);
+    });
+    await refreshFiles();
+    let last = null;
+    try { last = localStorage.getItem("codeFile:" + pdfPath); } catch (e) {}
+    const first = fileList.includes(last) ? last : mainFile;
+    if (first) await openLoaded(first);
+    else cmWrap.innerHTML = `<div id="cmNote">No source files in <code>${esc(srcRoot)}</code>. If the source is in another folder, ask ${esc(agentName)} to run <code>laitex open ${esc(document.title)} --src path/to/the/source</code>.</div>`;
+  })().catch(e => {
+    console.error(e);
+    cmLoading = null; cm = null;
+    cmWrap.innerHTML = `<div id="cmNote">The editor could not be loaded (${esc(e.message)}). It comes from cdnjs, so the browser needs internet access.</div>`;
+    throw e;
+  });
+  return cmLoading;
+}
+// A hidden editor forgets where it was scrolled to, so that is kept while the History tab or the
+// Render view hides it.
+let codeScroll = null;
+function codeHide() {
+  if (cm && cm.getWrapperElement().offsetParent) { const i = cm.getScrollInfo(); codeScroll = { left: i.left, top: i.top }; }
+}
+function codeShow() {
+  if (!cm || !codeShown()) return;
+  cm.refresh();
+  if (codeScroll && !histOpen) { cm.scrollTo(codeScroll.left, codeScroll.top); codeScroll = null; }
+}
+function applyCodeFont() { if (cm) { cm.getWrapperElement().style.fontSize = codeSize + "px"; cm.refresh(); } }
+function codeFont(d) {
+  codeSize = d === 0 ? 13 : Math.max(9, Math.min(26, codeSize + d));
+  try { localStorage.setItem("codeSize", codeSize); } catch (e) {}
+  applyCodeFont();
+}
+
+// The views: the code takes the left part of the page area in Code + Render, and all of it in Code.
+function setPane(p, first) {
+  if (!["render", "code", "split"].includes(p)) p = "render";
+  if (p === pane && !first) return;
+  const place = anchor();  // where the pages are, shown or not
+  if (p === "render") codeHide();
+  pane = p;
+  document.body.classList.remove("v-render", "v-code", "v-split");
+  document.body.classList.add("v-" + p);
+  document.querySelectorAll("#viewSeg button").forEach(b => b.classList.toggle("on", b.dataset.view === p));
+  try { localStorage.setItem("pane", p); } catch (e) {}
+  applyCodeW();
+  if (renderShown()) { gen++; layout(place); renderVisible(); } else hiddenPlace = place;
+  if (histOpen && cmp) { histToken++; histLayout(); }
+  hideChip();
+  if (codeShown()) ensureEditor().then(() => { codeShow(); refreshFiles(); if (histOpen) codeHistShow(); }).catch(() => {});
+  if (histOpen) histRenderList();
+}
+document.querySelectorAll("#viewSeg button").forEach(b => { b.onclick = () => setPane(b.dataset.view); });
+function applyCodeW() {
+  const avail = window.innerWidth - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--side")) || 370);
+  const w = Math.round(Math.max(240, Math.min(avail - 240, avail * codeFrac)));
+  document.documentElement.style.setProperty("--codew", w + "px");
+}
+const splitGrip = document.getElementById("splitGrip");
+splitGrip.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  splitGrip.setPointerCapture(e.pointerId);
+  splitGrip.classList.add("on"); document.body.classList.add("resizing");
+  const avail = () => window.innerWidth - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--side")) || 370);
+  const move = ev => { codeFrac = ev.clientX / avail(); applyCodeW(); layout(); if (cm) cm.refresh(); };
+  const up = ev => {
+    splitGrip.removeEventListener("pointermove", move); splitGrip.removeEventListener("pointerup", up);
+    splitGrip.classList.remove("on"); document.body.classList.remove("resizing");
+    codeFrac = Math.max(0.15, Math.min(0.85, ev.clientX / avail()));
+    try { localStorage.setItem("codeFrac", codeFrac); } catch (err) {}
+    relayout();
+  };
+  splitGrip.addEventListener("pointermove", move); splitGrip.addEventListener("pointerup", up);
+});
+splitGrip.addEventListener("dblclick", () => { codeFrac = 0.5; try { localStorage.removeItem("codeFrac"); } catch (e) {} relayout(); });
+
+// ---- the files ----
+let filesReq = null, srcRoot = "";
+function refreshFiles() {  // calls made while one is under way share it
+  if (!filesReq) filesReq = loadFiles().finally(() => { filesReq = null; });
+  return filesReq;
+}
+async function loadFiles() {
+  try {
+    const r = await (await fetch("/api/files")).json();
+    hasBuild = r.build; hasSync = r.synctex; mainFile = r.main; srcRoot = r.root;
+    const list = r.files.map(f => f.path);
+    if (list.join("\n") !== fileList.join("\n")) { fileList = list; drawTree(); }
+    for (const st of r.files) {
+      const f = files.get(st.path);
+      if (f && f.doc && !f.saving && (f.mtime !== st.mtime || f.size !== st.size)) await checkDisk(f);
+    }
+    for (const f of files.values())  // the server is back: save what could not be saved meanwhile
+      if (f.dirty && f.error === "the server is offline" && !f.saving) { f.error = null; saveFile(f); }
+    updateBuildBtn();
+  } catch (e) { console.error(e); }
+}
+// ---- the files, as a tree left of the editor ----
+// Folders first, then files, each sorted by name. A file shows its open comments and a dot while it
+// is not saved. With the History tab open, the files the two versions differ in are marked (M, A, D)
+// and a click shows that file's changes; a file without changes opens in the editor.
+let treeCollapsed = new Set(), treeW = 210, treeOff = false;
+try {
+  treeCollapsed = new Set(JSON.parse(localStorage.getItem("treeCollapsed") || "[]"));
+  treeW = +localStorage.getItem("treeW") || 210;
+  treeOff = localStorage.getItem("treeOff") === "1";
+} catch (e) {}
+const baseName = p => p.slice(p.lastIndexOf("/") + 1);
+const kindOf = p => { const e = (/\.([^./]+)$/.exec(p) || [])[1] || "";
+  return /^(tex|ltx|latex|tikz|pgf)$/i.test(e) ? "tex" : /^(bib|bst|bbx|cbx)$/i.test(e) ? "bib" : /^(sty|cls|dtx|ins|def|cfg)$/i.test(e) ? "sty" : /^(md|markdown|qmd|rmd|typ)$/i.test(e) ? "md" : ""; };
+function treeDiff() { return histOpen && codeDiff && codeShown() ? new Map(codeDiff.d.files.map(f => [f.path, f])) : null; }
+function drawTree() {
+  const diff = treeDiff(), paths = new Set(fileList);
+  if (curPath) paths.add(curPath);
+  if (diff) for (const p of diff.keys()) paths.add(p);
+  const rootNode = { dirs: new Map(), files: [] };
+  for (const p of paths) {
+    const parts = p.split("/");
+    let node = rootNode;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { path: parts.slice(0, i + 1).join("/"), dirs: new Map(), files: [] });
+      node = node.dirs.get(parts[i]);
+    }
+    node.files.push(p);
+  }
+  const counts = new Map();
+  for (const c of comments) if (c.file && c.status !== "resolved") counts.set(c.file, (counts.get(c.file) || 0) + 1);
+  const rows = [], top = treeEl.scrollTop;
+  const row = (depth, cls, data) => {
+    const el = document.createElement("div");
+    el.className = "ti " + cls; el.style.paddingLeft = 8 + depth * 14 + "px";
+    Object.assign(el.dataset, data);
+    rows.push(el);
+    return el;
+  };
+  const span = (cls, text) => { const e = document.createElement("span"); e.className = cls; if (text != null) e.textContent = text; return e; };
+  const walk = (node, depth) => {
+    for (const [name, d] of [...node.dirs].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const closed = treeCollapsed.has(d.path), el = row(depth, "dir", { dir: d.path });
+      const changed = diff && [...diff.keys()].some(p => p.startsWith(d.path + "/"));
+      el.append(span("tw", closed ? "▸" : "▾"), span("nm", name));
+      if (changed) { const st = span("st in", "•"); st.title = "has changed files"; el.append(st); }
+      el.title = d.path + "/";
+      if (!closed) walk(d, depth + 1);
+    }
+    for (const p of node.files.sort((a, b) => baseName(a).localeCompare(baseName(b)))) {
+      const f = files.get(p), ch = diff && diff.get(p), gone = diff ? !!ch && ch.status === "D" : !fileList.includes(p) && p !== curPath;
+      const el = row(depth, (p === curPath && !diff ? "on " : "") + (gone ? "gone " : "") + (f && (f.dirty || f.saving) ? "dirty" : ""), { path: p });
+      el.append(span("tw", ""), span("ic " + kindOf(p)), span("nm", baseName(p)), span("dirty", "●"));
+      if (counts.get(p)) { const cc = span("cc", counts.get(p)); cc.title = `${counts.get(p)} open comment${counts.get(p) === 1 ? "" : "s"}`; el.append(cc); }
+      if (ch) { const st = span("st " + ch.status, ch.status); st.title = { M: "changed", A: "new", D: "deleted" }[ch.status] + ` (+${ch.add} −${ch.del})`; el.append(st); }
+      el.title = p;
+    }
+  };
+  walk(rootNode, 0);
+  if (!rows.length) { const n = document.createElement("div"); n.className = "cdNote"; n.style.padding = "8px 12px"; n.textContent = "No source files."; rows.push(n); }
+  treeEl.replaceChildren(...rows);
+  treeEl.scrollTop = top;
+  updateFileLabels();
+}
+// The parts of the tree and the bar that change while typing: the unsaved dots and the file's path.
+function updateFileLabels() {
+  for (const el of treeEl.querySelectorAll(".ti[data-path]")) {
+    const f = files.get(el.dataset.path);
+    el.classList.toggle("dirty", !!(f && (f.dirty || f.saving)));
+  }
+  const k = curPath ? curPath.lastIndexOf("/") : -1;
+  filePathEl.innerHTML = curPath ? esc(curPath.slice(0, k + 1)) + "<b>" + esc(curPath.slice(k + 1)) + "</b>" : "";
+  filePathEl.title = curPath ? (srcRoot ? srcRoot + "/" : "") + curPath : "";
+}
+treeEl.addEventListener("click", e => {
+  const el = e.target.closest(".ti");
+  if (!el) return;
+  if (el.dataset.dir) {
+    const d = el.dataset.dir;
+    if (treeCollapsed.has(d)) treeCollapsed.delete(d); else treeCollapsed.add(d);
+    try { localStorage.setItem("treeCollapsed", JSON.stringify([...treeCollapsed])); } catch (err) {}
+    return drawTree();
+  }
+  const p = el.dataset.path, diff = treeDiff();
+  if (diff && diff.has(p)) {  // in History: that file's changes
+    const box = codeHist.querySelector(`.cdFile[data-path="${CSS.escape(p)}"]`);
+    if (box) codeHist.scrollTop = box.offsetTop - 10;
+    return;
+  }
+  if (!fileList.includes(p) && p !== curPath) return;
+  if (histOpen) setTab("review");
+  openFile(p);
+});
+function setTree(off) {
+  treeOff = off;
+  document.body.classList.toggle("tree-off", off);
+  document.getElementById("treeBtn").classList.toggle("on", !off);
+  try { localStorage.setItem("treeOff", off ? "1" : "0"); } catch (e) {}
+  if (cm) cm.refresh();
+  resizeDiff();
+}
+// The code pane changed width: the source diff may now fit side by side, or no longer.
+function resizeDiff() {
+  if (!histOpen || !codeShown() || typeof codeDiff === "undefined" || !codeDiff) return;
+  if ((histMode === "side" && codeHist.clientWidth >= SIDE_MIN) !== diffSide) renderCodeDiff();
+}
+document.getElementById("treeBtn").onclick = () => setTree(!treeOff);
+document.getElementById("treeHide").onclick = () => setTree(true);
+document.documentElement.style.setProperty("--treew", treeW + "px");
+setTree(treeOff);
+window.addEventListener("keydown", e => {  // Cmd+B, as in VS Code
+  if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.code !== "KeyB" || !codeShown()) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  setTree(!treeOff);
+}, true);
+const treeGrip = document.getElementById("treeGrip");
+treeGrip.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  treeGrip.setPointerCapture(e.pointerId);
+  treeGrip.classList.add("on"); document.body.classList.add("resizing");
+  const left = document.getElementById("code").getBoundingClientRect().left;
+  const move = ev => {
+    treeW = Math.round(Math.max(120, Math.min(520, ev.clientX - left)));
+    document.documentElement.style.setProperty("--treew", treeW + "px");
+  };
+  const up = () => {
+    treeGrip.removeEventListener("pointermove", move); treeGrip.removeEventListener("pointerup", up);
+    treeGrip.classList.remove("on"); document.body.classList.remove("resizing");
+    try { localStorage.setItem("treeW", treeW); } catch (err) {}
+    if (cm) cm.refresh();
+    resizeDiff();
+  };
+  treeGrip.addEventListener("pointermove", move); treeGrip.addEventListener("pointerup", up);
+});
+async function openFile(path, at) {
+  await ensureEditor();
+  return openLoaded(path, at);
+}
+async function openLoaded(path, at) {  // openFile, once the editor is there
+  let f = files.get(path);
+  if (!f) {
+    let j;
+    try {
+      const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+      j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+    } catch (e) { showBanner(`Could not open ${path}: ${e.message}.`); return false; }
+    if (j.text == null) { showBanner(`${path} cannot be edited here: ${j.error}.`); return false; }
+    // The editor works with \n; a save writes the file's own line break back. A file that mixes
+    // them is saved with the one most of its lines use.
+    const crlf = (j.text.match(/\r\n/g) || []).length, lone = (j.text.match(/\n/g) || []).length - crlf;
+    f = { path, hash: j.hash, mtime: j.mtime, size: j.size, dirty: false, saving: null, marks: new Map(), gen: 0,
+          tabs: /^\t/m.test(j.text), eol: crlf > lone ? "\r\n" : "\n" };
+    f.doc = CodeMirror.Doc(j.text, modeFor(path));
+    f.saved = f.doc.getValue();
+    f.doc.on("change", (d, ch) => onChange(f, ch));
+    files.set(path, f);
+    if (crlf && lone) showBanner(`${path} mixes Windows and Unix line breaks; saving it here writes ${f.eol === "\n" ? "Unix (LF)" : "Windows (CRLF)"} ones throughout.`, [], 8000);
+  }
+  if (cm.getDoc() !== f.doc) {
+    curPath = path;
+    cm.swapDoc(f.doc);
+    cm.setOption("indentWithTabs", f.tabs);
+    try { localStorage.setItem("codeFile:" + pdfPath, path); } catch (e) {}
+  }
+  drawTree();
+  const item = treeEl.querySelector(`.ti[data-path="${CSS.escape(path)}"]`);
+  if (item) item.scrollIntoView({ block: "nearest" });
+  drawCodeMarks(); updateSaveState();
+  if (at) goToCode(at);
+  return true;
+}
+function goToCode(at) {
+  const from = at.range ? { line: at.range[0], ch: at.range[1] } : { line: at.line, ch: at.ch || 0 };
+  const to = at.range ? { line: at.range[2], ch: at.range[3] } : from;
+  if (at.focus || !at.range) cm.setCursor(from);
+  cm.scrollIntoView({ from, to }, Math.round(cm.getScrollInfo().clientHeight / 3));
+  if (at.flash) flashLines(from.line, to.line);
+  if (at.focus) cm.focus();
+}
+function flashLines(a, b) {
+  const hs = [];
+  for (let l = Math.max(0, a); l <= Math.min(b, cm.lineCount() - 1, a + 200); l++) hs.push(cm.addLineClass(l, "background", "cm-flash"));
+  setTimeout(() => hs.forEach(h => cm.removeLineClass(h, "background", "cm-flash")), 2700);
+}
+
+// ---- saving, and taking in changes made on disk ----
+function onChange(f, ch) {
+  if (ch.origin === "+disk") return;
+  f.dirty = true; hideChip(); updateSaveState();
+  clearTimeout(f.timer); f.timer = setTimeout(() => saveFile(f), 700);
+}
+// A file is not saved while its changes clash with the file on disk (until you choose which to
+// keep), or after it was deleted or moved on disk (until you save it again).
+function saveFile(f) {
+  if (f.saving) { f.again = true; return f.saving; }
+  if (!f.dirty || f.conflict || f.gone) return Promise.resolve(!f.dirty);
+  clearTimeout(f.timer);
+  f.saving = (async () => {
+    for (let tries = 0; tries < 4; tries++) {
+      const text = f.doc.getValue(), body = f.eol === "\n" ? text : text.split("\n").join(f.eol);
+      let r, j;
+      try {
+        r = await fetch("/api/file", { method: "POST", headers: H, body: JSON.stringify({ path: f.path, text: body, base: f.hash }) });
+        j = await r.json();
+      } catch (e) { f.error = "the server is offline"; return false; }
+      if (r.ok) {
+        Object.assign(f, { hash: j.hash, mtime: j.mtime, size: j.size, saved: text, error: null });
+        f.gen++;
+        f.dirty = f.doc.getValue() !== text;
+        saveMarks(f); scheduleBuild();
+        return true;
+      }
+      if (r.status === 409 && j.hash === null) { fileGone(f); return false; }
+      if (r.status === 409 && "hash" in j && j.text != null) {
+        mergeDisk(f, j);
+        if (!f.dirty) return true;
+        if (f.conflict) return false;
+        continue;
+      }
+      f.error = j.error || "could not save";
+      return false;
+    }
+    f.error = "the file keeps changing on disk";
+    return false;
+  })().finally(() => {
+    f.saving = null; updateSaveState();
+    if (f.again) { f.again = false; if (f.dirty) saveFile(f); }
+  });
+  updateSaveState();
+  return f.saving;
+}
+// Save every file; true when all of them are saved.
+async function saveAll() {
+  for (let k = 0; k < 5; k++) {
+    const busy = [...files.values()].filter(f => (f.dirty || f.saving) && !f.conflict && !f.gone && !f.error);
+    if (!busy.length) break;
+    await Promise.all(busy.map(f => f.saving || saveFile(f)));
+  }
+  return ![...files.values()].some(f => f.dirty || f.saving);
+}
+window.addEventListener("beforeunload", e => {
+  if ([...files.values()].some(f => f.dirty || f.saving)) { saveAll(); e.preventDefault(); e.returnValue = ""; }
+});
+function updateSaveState() {
+  const f = files.get(curPath);
+  let t = "", bad = false;
+  if (f) t = f.conflict ? (bad = true, "not saved: choose above which text to keep")
+          : f.gone ? (bad = true, "not saved: the file is gone from disk")
+          : f.error ? (bad = true, "not saved: " + f.error) : f.saving ? "saving…" : f.dirty ? "edited" : "saved";
+  const others = [...files.values()].filter(x => x !== f && (x.dirty || x.error)).length;
+  if (others) t += ` · ${others} other file${others === 1 ? "" : "s"} not saved yet`;
+  saveStateEl.textContent = t; saveStateEl.classList.toggle("bad", bad);
+  saveStateEl.title = f ? f.path : "";
+  updateFileLabels();
+}
+async function checkDisk(f) {
+  let j;
+  const gen = f.gen;
+  try {
+    const r = await fetch("/api/file?path=" + encodeURIComponent(f.path));
+    if (!r.ok) return;
+    j = await r.json();
+  } catch (e) { return; }
+  if (f.saving || f.gen !== gen) return;  // a save since: its answer took the change in, or this text is older
+  if (j.hash === f.hash) { f.mtime = j.mtime; f.size = j.size; return; }
+  if (j.text == null) return;
+  mergeDisk(f, j);
+  if (f.dirty) saveFile(f);
+}
+// The longest common subsequence of two lists of lines, as index pairs (see matchRange above).
+function linePairs(a, b) { const out = []; matchRange(a, b, 0, a.length, 0, b.length, out); return out; }
+// Three-way merge of two edits of the same base (lists of lines, or of words). Between the items
+// neither side changed, a stretch only one side changed takes that side's version. A stretch both
+// changed goes to `finer`, when given, which may merge it at a smaller grain; otherwise yours is
+// kept there and it counts as a conflict.
+function merge3(base, mine, theirs, finer) {
+  const m = new Int32Array(base.length).fill(-1), t = new Int32Array(base.length).fill(-1);
+  for (const [i, j] of linePairs(base, mine)) m[i] = j;
+  for (const [i, k] of linePairs(base, theirs)) t[i] = k;
+  const same = (x, y) => x.length === y.length && x.every((v, n) => v === y[n]);
+  const out = [];
+  let i = 0, j = 0, k = 0, conflicts = 0, conflictAt = -1;
+  for (;;) {
+    let ii = i;
+    while (ii < base.length && (m[ii] < 0 || t[ii] < 0)) ii++;  // the next item nobody changed
+    const jj = ii < base.length ? m[ii] : mine.length, kk = ii < base.length ? t[ii] : theirs.length;
+    const B = base.slice(i, ii), M = mine.slice(j, jj), T = theirs.slice(k, kk);
+    let r;
+    if (same(M, B)) out.push(...T);
+    else if (same(T, B) || same(M, T)) out.push(...M);
+    else if (finer && (r = finer(B, M, T))) out.push(...r);
+    else { if (!conflicts) conflictAt = out.length; conflicts++; out.push(...M); }
+    if (ii >= base.length) break;
+    out.push(base[ii]); i = ii + 1; j = jj + 1; k = kk + 1;
+  }
+  return { lines: out, conflicts, conflictAt };
+}
+// Lines both sides changed, merged word by word: you edit one sentence of a paragraph and the agent
+// another, or you a line and the agent the next one. Text both added at the same place is kept, yours
+// first. Returns null when the words clash too.
+function mergeWords(B, M, T) {
+  if (!B.length) return [...M, ...T];
+  const words = a => a.join("\n").match(/\s+|\S+/g) || [];
+  const r = merge3(words(B), words(M), words(T), null);
+  return r.conflicts ? null : r.lines.join("").split("\n");
+}
+// Replace lines a0..a1 of a document with new ones, keeping the rest (and the marks on it) untouched.
+function replaceLines(d, a0, a1, L) {
+  const n = d.lineCount(), sep = d.lineSeparator(), end = l => ({ line: l, ch: d.getLine(l).length });
+  if (a1 < n) d.replaceRange(L.map(l => l + sep).join(""), { line: a0, ch: 0 }, { line: a1, ch: 0 }, "+disk");
+  else if (a0 > 0) d.replaceRange(L.map(l => sep + l).join(""), end(a0 - 1), end(n - 1), "+disk");
+  else d.replaceRange(L.join(sep), { line: 0, ch: 0 }, end(n - 1), "+disk");
+}
+// Text from disk goes in as edits of the changed lines only, so the marks on the rest stay put. It
+// also clears the undo history: CodeMirror would otherwise let Cmd+Z take the agent's change back
+// out, and autosave would write that.
+function applyLines(f, lines) {
+  const d = f.doc, old = [];
+  d.eachLine(l => { old.push(l.text); });
+  const hunks = wordDiff(old, lines).raw, here = cm && cm.getDoc() === d;
+  const run = () => { for (let h = hunks.length - 1; h >= 0; h--) replaceLines(d, hunks[h].a0, hunks[h].a1, lines.slice(hunks[h].b0, hunks[h].b1)); };
+  if (here) cm.operation(run); else run();
+  if (hunks.length) d.clearHistory();
+  if (here) for (const h of hunks) if (h.b1 > h.b0) flashLines(h.b0, h.b1 - 1);
+}
+function mergeDisk(f, j) {
+  const d = f.doc, mine = d.getValue(), base = f.saved, clashed = !!f.conflict;
+  Object.assign(f, { hash: j.hash, mtime: j.mtime, size: j.size, conflict: null });
+  f.gen++;
+  const theirs = d.splitLines(j.text).join("\n");
+  f.saved = theirs;
+  if (theirs === mine) { f.dirty = false; if (clashed) hideBanner(); updateSaveState(); return; }
+  let merged = { lines: d.splitLines(theirs), conflicts: 0 };
+  if (mine !== base) merged = merge3(d.splitLines(base), d.splitLines(mine), d.splitLines(theirs), mergeWords);
+  applyLines(f, merged.lines);
+  f.dirty = d.getValue() !== theirs;
+  if (merged.conflicts) {
+    // Nothing is saved until you choose, so the file on disk keeps the other version meanwhile.
+    f.conflict = { line: merged.conflictAt + 1 };
+    showBanner(`${f.path} changed on disk while you were typing, in the same words as you (line ${merged.conflictAt + 1}). ` +
+      "The editor shows your text there and the rest of the change; the file on disk is left as it is until you choose.",
+      [["Keep mine", () => { f.conflict = null; f.dirty = true; saveFile(f); }], ["Use the file on disk", () => useDisk(f)]], 0, true);
+  } else if (mine !== base) showBanner(`${f.path} changed on disk while you were typing; the changes are merged with yours.`, [], 6000);
+  if (!f.dirty) saveMarks(f);
+  updateSaveState();
+}
+async function useDisk(f) {  // the file as it is on disk now, not as it was when the clash was found
+  let j;
+  try { const r = await fetch("/api/file?path=" + encodeURIComponent(f.path)); if (!r.ok) return; j = await r.json(); } catch (e) { return; }
+  if (j.text == null) return;
+  applyLines(f, f.doc.splitLines(j.text));
+  Object.assign(f, { hash: j.hash, mtime: j.mtime, size: j.size, saved: f.doc.getValue(), dirty: false, conflict: null, error: null });
+  f.gen++;
+  saveMarks(f); updateSaveState();
+}
+function fileGone(f) {
+  f.gone = true;
+  showBanner(`${f.path} was deleted or moved on disk, so your text is not saved.`, [
+    ["Save it again", () => { f.gone = false; f.hash = null; saveFile(f); }],
+    ["Close it", () => {
+      files.delete(f.path);
+      if (curPath === f.path && mainFile && mainFile !== f.path) openFile(mainFile);
+      drawTree();
+    }]], 0, true);
+}
+let bannerTimer;
+// A note above the editor. One that asks for a choice (a clash with the file on disk) has no ×.
+function showBanner(text, actions = [], ttl = 0, choice = false) {
+  banner.replaceChildren();
+  const s = document.createElement("span"); s.textContent = text; banner.append(s);
+  for (const [label, fn] of choice ? actions : [...actions, ["×", () => {}]]) {
+    const a = document.createElement("a"); a.textContent = label;
+    a.onclick = () => { fn(); hideBanner(); };
+    banner.append(a);
+  }
+  banner.classList.add("on");
+  clearTimeout(bannerTimer);
+  if (ttl) bannerTimer = setTimeout(hideBanner, ttl);
+  if (cm) cm.refresh();
+}
+function hideBanner() { banner.classList.remove("on"); if (cm) cm.refresh(); }
+
+// ---- comments on the code ----
+// A comment holds the file, its lines for the agent and the exact range for the editor. Its
+// highlight is a CodeMirror mark, which moves with edits; the new range is stored after a save.
+// A range that no longer holds the quoted text (the file changed while not open here) is found
+// again by its text, nearest the old place.
+function codePlace(d, from, to) {
+  const quote = d.getRange(from, to), n = d.lineCount();
+  const c0 = { line: Math.max(0, from.line - 3), ch: 0 }, l1 = Math.min(n - 1, to.line + 3), c1 = { line: l1, ch: d.getLine(l1).length };
+  return {
+    line: from.line + 1, end_line: to.ch === 0 && to.line > from.line ? to.line : to.line + 1,
+    range: [from.line, from.ch, to.line, to.ch], quote,
+    context: d.getRange(c0, from).slice(-500) + "[[" + quote + "]]" + d.getRange(to, c1).slice(0, 500),
+  };
+}
+// Where a comment's text is: at its range, or found by its text nearest there, or, when the text is
+// gone (the agent rewrote it), a guess at its line, which is shown but never stored.
+function rangeOf(f, c) {
+  const d = f.doc;
+  if (c.range) {
+    const from = d.clipPos({ line: c.range[0], ch: c.range[1] }), to = d.clipPos({ line: c.range[2], ch: c.range[3] });
+    if (!c.quote || d.getRange(from, to) === c.quote) return { from, to };
+  }
+  if (c.quote) {
+    const text = d.getValue(), want = c.range ? d.indexFromPos({ line: c.range[0], ch: c.range[1] }) : 0;
+    let best = -1;
+    for (let i = text.indexOf(c.quote); i >= 0; i = text.indexOf(c.quote, i + 1))
+      if (best < 0 || Math.abs(i - want) < Math.abs(best - want)) best = i;
+    if (best >= 0) return { from: d.posFromIndex(best), to: d.posFromIndex(best + c.quote.length) };
+  }
+  if (c.line) {
+    const l = Math.min(d.lineCount() - 1, c.line - 1);
+    return { from: { line: l, ch: 0 }, to: { line: l, ch: d.getLine(l).length }, guess: true };
+  }
+  return null;
+}
+function drawCodeMarks() {
+  if (!cm) return;
+  for (const [path, f] of files) {
+    if (!f.doc) continue;
+    const want = new Map();
+    for (const c of comments) if (c.file === path && (c.status !== "resolved" || c.id === activeId)) want.set(c.id, c);
+    if (pending && pending.file === path) want.set("__pending", { ...pending, id: "__pending", status: "pending", comment: "" });
+    let moved = false;
+    for (const [id, m] of f.marks) if (!want.has(id)) { m.mark.clear(); f.marks.delete(id); }
+    for (const [id, c] of want) {
+      const state = c.id === activeId ? "active" : c.status, m = f.marks.get(id);
+      if (m && m.state === state && m.mark.find()) continue;
+      const pos = (m && m.mark.find()) || rangeOf(f, c);
+      if (m) m.mark.clear();
+      if (!pos) { f.marks.delete(id); continue; }
+      const mark = f.doc.markText(pos.from, pos.to, { className: "cmt " + state, clearWhenEmpty: false,
+                                                      attributes: { "data-cid": id, title: c.comment || "" } });
+      const guess = m ? m.guess : !!pos.guess;
+      f.marks.set(id, { mark, state, title: c.comment || "", guess });
+      moved = moved || (!m && id !== "__pending" && !guess);
+    }
+    if (moved && !f.dirty) saveMarks(f);
+  }
+  drawCodeGutter();
+}
+function drawCodeGutter() {
+  if (!cm) return;
+  cm.clearGutter("cmt-gutter");
+  const f = files.get(curPath);
+  if (!f || cm.getDoc() !== f.doc) return;
+  for (const [id, m] of f.marks) {
+    const pos = m.mark.find();
+    if (!pos || id === "__pending") continue;
+    const dot = document.createElement("div");
+    dot.className = "cmt-dot " + m.state; dot.dataset.cid = id; dot.title = m.title;
+    cm.setGutterMarker(pos.from.line, "cmt-gutter", dot);
+  }
+}
+// Store where the comments of a file are now, after edits moved them.
+function saveMarks(f) {
+  clearTimeout(f.markTimer);
+  f.markTimer = setTimeout(async () => {
+    for (const [id, m] of f.marks) {
+      const c = comments.find(x => x.id === id), pos = m.mark.find();
+      if (!c || !pos || f.dirty || m.guess || c.status === "resolved") continue;
+      const range = [pos.from.line, pos.from.ch, pos.to.line, pos.to.ch];
+      if (c.range && range.every((v, k) => v === c.range[k])) continue;
+      const body = codePlace(f.doc, pos.from, pos.to);
+      Object.assign(c, body);
+      try { await fetch("/api/comments/" + id, { method: "PATCH", headers: H, body: JSON.stringify(body) }); } catch (e) {}
+    }
+  }, 400);
+}
+function startCodeComment() {
+  if (!cm || !curPath || !cm.somethingSelected()) return;
+  const d = cm.getDoc(), r = d.listSelections()[0];
+  let from = r.anchor, to = r.head;
+  if (CodeMirror.cmpPos(from, to) > 0) [from, to] = [to, from];
+  if (!d.getRange(from, to).trim()) return;
+  hideChip();
+  pending = { file: curPath, ...codePlace(d, from, to) };
+  openPop(cm.cursorCoords(to, "window"));
+}
+async function showCodeComment(c) {
+  if (pane === "render") setPane("split");
+  if (!(await openFile(c.file))) return;
+  const f = files.get(c.file), m = f.marks.get(c.id), pos = (m && m.mark.find()) || rangeOf(f, c);
+  if (pos) goToCode({ range: [pos.from.line, pos.from.ch, pos.to.line, pos.to.ch] });
+}
+function pickComment(id) {
+  if (!comments.some(c => c.id === id)) return;
+  activeId = id;
+  if (sideTab === "chat" || sideTab === "log") setTab("review");
+  drawList(); drawHighlights();
+  const card = document.querySelector(`#list .c[data-id="${id}"]`);
+  if (card) card.scrollIntoView({ block: "nearest" });
+}
+// The Comment button next to a selection in the code; Cmd+K does the same.
+let chipTimer;
+function onCursor() {
+  hideChip(); clearTimeout(chipTimer);
+  if (cm.somethingSelected()) chipTimer = setTimeout(showChip, 300);
+}
+function showChip() {
+  if (!cm || !cm.somethingSelected() || !cm.hasFocus() || pop.style.display === "block" || histOpen) return;
+  const c = cm.cursorCoords(cm.getCursor("to"), "window"), box = cmWrap.getBoundingClientRect();
+  if (c.bottom < box.top || c.top > box.bottom) return;
+  chip.textContent = sideTab === "chat" ? "Ask in the chat" : "Comment";
+  chip.style.display = "block";
+  chip.style.left = Math.max(box.left + 4, Math.min(c.left + 4, box.right - chip.offsetWidth - 8)) + "px";
+  chip.style.top = (c.bottom + 32 < box.bottom ? c.bottom + 4 : Math.max(box.top + 4, c.top - 28)) + "px";
+}
+function hideChip() { chip.style.display = "none"; }
+chip.addEventListener("mousedown", e => { e.preventDefault(); startCodeComment(); });
+
+// ---- from the PDF to the code, and back ----
+// With SyncTeX (a .synctex.gz next to the PDF, from pdflatex -synctex=1, latexmk -synctex=1 or
+// tectonic --synctex) the server knows which line made each spot of the page. Without it, the
+// text around the spot is looked up in the source, and a line of the source in the PDF's text.
+pagesEl.addEventListener("click", e => {
+  if (!(e.metaKey || e.ctrlKey) || e.button !== 0 || (e.target.closest && e.target.closest(".links a"))) return;
+  const div = e.target.closest && e.target.closest(".page");
+  if (!div || !sizes.length) return;
+  e.preventDefault();
+  syncToCode(div, e.clientX, e.clientY);
+});
+function textAt(div, cx, cy) {
+  const tl = div.querySelector(".textLayer"), spans = tl ? [...tl.children].filter(s => s.nodeName === "SPAN") : [];
+  let node = null, off = 0;
+  if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(cx, cy); if (r) { node = r.startContainer; off = r.startOffset; } }
+  else if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(cx, cy); if (p) { node = p.offsetNode; off = p.offset; } }
+  if (!node || !tl.contains(node) || node === tl) {  // between the lines: the nearest piece of text
+    let best = null, bestD = Infinity;
+    for (const s of spans) {
+      const b = s.getBoundingClientRect(), d = Math.hypot(Math.max(b.left - cx, 0, cx - b.right), Math.max(b.top - cy, 0, cy - b.bottom));
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (!best) return null;
+    node = best; off = 0;
+  }
+  let txt = "", at = -1, lastTop = null;
+  for (const s of spans) {
+    const top = s.offsetTop;
+    if (lastTop !== null && Math.abs(top - lastTop) > s.offsetHeight / 2) txt += " ";
+    if (at < 0 && s.contains(node)) at = txt.length + (node.nodeType === 3 ? off : 0);
+    txt += s.textContent; lastTop = top;
+  }
+  if (at < 0) return null;
+  const lo = Math.max(0, at - 300);
+  return { text: txt.slice(lo, at + 300), at: at - lo };
+}
+async function syncToCode(div, cx, cy) {
+  const n = +div.dataset.page, r = div.getBoundingClientRect(), sz = sizes[n - 1];
+  const x = (cx - r.left) / r.width * sz.w, y = (cy - r.top) / r.height * sz.h;
+  let hit = null;
+  try { const q = await fetch(`/api/synctex/edit?page=${n}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`); if (q.ok) hit = await q.json(); } catch (e) {}
+  if (!hit) {
+    const t = textAt(div, cx, cy);
+    if (t) try { const q = await fetch("/api/locate", { method: "POST", headers: H, body: JSON.stringify(t) }); if (q.ok) hit = await q.json(); } catch (e) {}
+  }
+  if (!hit || !hit.file) { statusEl.textContent = "that spot was not found in the source"; return; }
+  if (pane === "render") setPane("split");
+  if (await openFile(hit.file)) goToCode({ line: hit.line - 1, ch: hit.ch || 0, flash: true, focus: true });
+}
+const HIDDEN_ARGS = new Set(["cite", "citep", "citet", "citealp", "citeauthor", "citeyear", "parencite", "textcite", "autocite",
+  "ref", "eqref", "autoref", "cref", "Cref", "pageref", "nameref", "label", "includegraphics", "input", "include", "usepackage",
+  "documentclass", "bibliography", "bibliographystyle", "begin", "end", "newcommand", "renewcommand", "def", "hspace", "vspace",
+  "setlength", "addbibresource", "url", "href", "color", "textcolor", "definecolor"]);
+// The letters of a line of LaTeX that reach the page, lowercased, and where column ch falls in them.
+function sourceLetters(text, ch) {
+  let out = "", at = -1, i = 0;
+  const n = text.length;
+  while (i < n) {
+    if (at < 0 && i >= ch) at = out.length;
+    const c = text[i];
+    if (c === "%" && text[i - 1] !== "\\") break;
+    if (c === "\\") {
+      let j = i + 1;
+      while (j < n && /[A-Za-z]/.test(text[j])) j++;
+      const name = text.slice(i + 1, j);
+      i = j > i + 1 ? j : i + 2;
+      if (HIDDEN_ARGS.has(name)) {
+        while (i < n && /[ *]/.test(text[i])) i++;
+        let depth = 0;
+        while (i < n && (depth || "{[".includes(text[i]))) { depth += "{[".includes(text[i]) ? 1 : "}]".includes(text[i]) ? -1 : 0; i++; }
+      }
+      continue;
+    }
+    if (/\p{L}/u.test(c)) out += c.toLowerCase();
+    i++;
+  }
+  return { txt: out, at: at < 0 ? out.length : at };
+}
+const pdfLetters = new WeakMap();  // doc -> its pages' text and letters
+function lettersOf(d) {
+  if (!pdfLetters.has(d)) pdfLetters.set(d, (async () => {
+    const out = [];
+    for (let n = 1; n <= d.numPages; n++) {
+      const pt = await pageText(d, n), red = reduce(pt, ch => /\p{L}/u.test(ch));
+      red.txt = red.txt.toLowerCase();
+      out.push({ pt, red });
+    }
+    return out;
+  })());
+  return pdfLetters.get(d);
+}
+async function findInPdf(pos) {
+  const d = doc;
+  if (!d) return null;
+  const pages = await lettersOf(d);
+  for (let l = pos.line; l < Math.min(cm.lineCount(), pos.line + 6); l++) {  // a line without text: the next one with some
+    const { txt, at } = sourceLetters(cm.getLine(l), l === pos.line ? pos.ch : 0);
+    if (txt.length < 6) continue;
+    for (const L of [40, 28, 18, 12]) {
+      const lo = Math.max(0, at - L), q = txt.slice(lo, at + L);
+      if (q.length < 8) continue;
+      const hits = [];
+      pages.forEach((p, i) => { for (let j = p.red.txt.indexOf(q); j >= 0 && hits.length < 3; j = p.red.txt.indexOf(q, j + 1)) hits.push([i, j]); });
+      if (hits.length === 1 || (hits.length && L === 12)) {
+        const [i, j] = hits[0];
+        return { page: i + 1, boxes: boxes(pages[i].pt, pages[i].red.map, j, j + q.length) };
+      }
+    }
+  }
+  return null;
+}
+async function syncToPdf() {
+  if (!cm || !curPath || !doc) return;
+  const pos = cm.getCursor();
+  let page = 0, rects = null;
+  if (hasSync) try {
+    const q = await fetch(`/api/synctex/view?file=${encodeURIComponent(curPath)}&line=${pos.line + 1}`);
+    const j = q.ok ? await q.json() : null, sz = j && sizes[j.page - 1];  // null: not on the page
+    if (sz) { page = j.page; rects = j.boxes.map(b => [b.x / sz.w, b.y / sz.h, b.w / sz.w, b.h / sz.h]); }
+  } catch (e) {}
+  if (!rects) { const hit = await findInPdf(pos); if (hit) ({ page, boxes: rects } = hit); }
+  if (!rects || !rects.length) { showBanner(`Line ${pos.line + 1} was not found in the PDF.`, [], 4000); return; }
+  if (histOpen) setTab("review");
+  if (pane === "code") setPane("split");
+  showInPdf(page, rects);
+}
+syncBtn.onclick = syncToPdf;
+function showInPdf(n, rects) {
+  const div = pagesEl.children[n - 1];
+  if (!div) return;
+  main.scrollTop = div.offsetTop + rects[0][1] * div.offsetHeight - main.clientHeight / 3;
+  const x = div.offsetLeft + rects[0][0] * div.offsetWidth;
+  if (x < main.scrollLeft || x > main.scrollLeft + main.clientWidth - 40) main.scrollLeft = x - 40;
+  div.querySelectorAll(".syncl").forEach(l => l.remove());
+  const layer = document.createElement("div"); layer.className = "syncl";
+  for (const r of rects) {
+    const i = document.createElement("i");
+    i.style.left = r[0] * 100 + "%"; i.style.top = r[1] * 100 + "%"; i.style.width = r[2] * 100 + "%"; i.style.height = r[3] * 100 + "%";
+    layer.append(i);
+  }
+  div.append(layer);
+  setTimeout(() => layer.remove(), 3000);
+}
+
+// ---- building ----
+// With a build command (laitex open --build), Recompile and Cmd+S save and build here, and "auto"
+// builds after each save. Without one, the agent is asked to build.
+let buildInfo = {}, buildTimer = null, buildSeen = null;
+function updateBuild(b) {
+  if (!b) return;
+  const done = b.finished || null;
+  buildInfo = b;
+  if (done !== buildSeen) { buildSeen = done; if (sideTab === "log") loadLog(); }
+  updateBuildBtn();
+}
+function updateBuildBtn() {
+  const b = buildInfo, configured = !!(b.configured || hasBuild), asked = request_ && request_.action === "build";
+  autoLbl.style.display = configured ? "" : "none";
+  buildBtn.textContent = configured ? (b.running && b.by === "you" ? "Compiling…" : "Recompile") : asked ? "Rebuild asked…" : "Rebuild";
+  buildBtn.title = configured ? "Save and build the PDF (Cmd+S)"
+    : `Save, and ask ${agentName} to build the PDF (Cmd+S). With laitex open --build, it is built here instead.`;
+  buildBtn.disabled = !configured && !!request_;
+  let t = "", bad = false;
+  if (b.running) t = b.by === "you" ? "" : `${agentName} is building…`;
+  else if (b.finished && !b.ok) { t = "the build failed"; bad = true; }
+  else if (b.finished) t = "built " + new Date(b.finished * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  buildStateEl.textContent = t; buildStateEl.classList.toggle("bad", bad);
+  buildStateEl.title = bad ? "Show the build's output and errors in the Log tab" : "";
+}
+buildStateEl.onclick = () => { if (buildStateEl.classList.contains("bad")) setTab("log"); };
+async function compile() {
+  if (!(await saveAll())) {
+    const f = [...files.values()].find(f => f.dirty || f.saving);
+    showBanner(`${f.path} is not saved, so the PDF is not rebuilt yet.`, [], 6000);
+    return;
+  }
+  if (buildInfo.configured || hasBuild) {
+    try { await fetch("/api/build", { method: "POST", headers: H }); } catch (e) {}
+    buildInfo = { ...buildInfo, running: true, by: "you" }; updateBuildBtn();
+  } else if (!request_) await request("build");
+  updateBuildBtn();
+}
+function scheduleBuild() {
+  if (!autoBuild || !(buildInfo.configured || hasBuild)) return;
+  clearTimeout(buildTimer);
+  buildTimer = setTimeout(() => {
+    if (!autoBuild) return;
+    if ([...files.values()].some(f => f.dirty || f.saving)) return scheduleBuild();
+    fetch("/api/build", { method: "POST", headers: H }).catch(() => {});
+  }, 1200);
+}
+autoBox.onchange = () => {
+  autoBuild = autoBox.checked;
+  if (!autoBuild) clearTimeout(buildTimer);  // a build already scheduled is called off too
+  try { localStorage.setItem("autoBuild", autoBuild ? "1" : "0"); } catch (e) {}
+};
+buildBtn.onclick = compile;
+
+// ---- the source in the History tab: the files that changed between the two versions ----
+// The server compares the versions' snapshots in git (refs/laitex/...); the version in progress is
+// the files as they are now. Changed lines are paired up and their changed words marked.
+let codeDiff = null, codeHistTok = 0;
+async function codeHistShow() {
+  if (!histOpen || !codeShown()) return;
+  const a = +histA.value, b = +histB.value, tok = ++codeHistTok;
+  if (!b) { codeHist.replaceChildren(); return; }
+  if (!codeDiff || codeDiff.a !== a || codeDiff.b !== b) {
+    codeHist.innerHTML = '<div class="cdNote">Comparing the source…</div>';
+    wholeFiles.clear();  // other versions: every file shows its changes only again
+  }
+  let d;
+  try {
+    d = await (await fetch(`/api/srcdiff?a=${a}&b=${b}`)).json();
+    for (const p of wholeFiles) {  // the files you opened whole stay whole
+      const w = await (await fetch(`/api/srcdiff?a=${a}&b=${b}&file=${encodeURIComponent(p)}&ctx=100000`)).json();
+      const nf = w.files.find(x => x.path === p), i = d.files.findIndex(x => x.path === p);
+      if (nf && i >= 0) { nf.whole = true; d.files[i] = nf; }
+    }
+  } catch (e) { d = { files: [], note: "The source could not be compared: the server is offline." }; }
+  if (tok !== codeHistTok) return;
+  codeDiff = { a, b, d };
+  renderCodeDiff(); histRenderList(); drawTree();
+}
+// Side by side needs room for two columns of code; a narrower pane shows one column and says so.
+const SIDE_MIN = 620;
+let diffSide = false;
+function renderCodeDiff() {
+  const { a, b, d } = codeDiff, top = codeHist.scrollTop;
+  diffSide = histMode === "side" && codeHist.clientWidth >= SIDE_MIN;
+  codeHist.replaceChildren();
+  const head = document.createElement("div"); head.className = "cdHead";
+  const plus = d.files.reduce((n, f) => n + f.add, 0), minus = d.files.reduce((n, f) => n + f.del, 0), k = d.files.length;
+  head.textContent = `The source of ${nameOf(b)}` + (a ? ` against ${nameOf(a)}` : ", every file as new") + ": " +
+    (k ? `${k} file${k === 1 ? "" : "s"}, +${plus} −${minus} lines` : "no source file changed") +
+    (d.others ? `; ${d.others} other file${d.others === 1 ? "" : "s"} changed too` : "") + ". Double-click a line to edit it." +
+    (histMode === "side" && !diffSide && k ? " Side by side needs a wider pane: drag the divider, hide the files (Cmd+B), or use the Code view." : "");
+  if (!d.note) codeHist.append(head);
+  if (d.note) { const n = document.createElement("div"); n.className = "cdNote"; n.textContent = d.note; codeHist.append(n); }
+  for (const f of d.files) codeHist.append(fileDiff(f));
+  codeHist.scrollTop = top;
+}
+function wordMarks(del, add) {
+  const tok = t => t.match(/\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) || [];
+  const A = tok(del.text), B = tok(add.text);
+  if (A.length + B.length > 3000) return;
+  const { raw } = wordDiff(A, B);
+  const changed = raw.reduce((n, h) => n + (h.a1 - h.a0) + (h.b1 - h.b0), 0);
+  if (changed > 0.7 * (A.length + B.length)) return;  // mostly rewritten: the whole line is the change
+  const mark = (toks, lo, hi, tag) => {
+    let html = "", at = 0;
+    for (const h of raw) {
+      if (h[hi] <= h[lo]) continue;
+      html += esc(toks.slice(at, h[lo]).join("")) + `<${tag}>` + esc(toks.slice(h[lo], h[hi]).join("")) + `</${tag}>`;
+      at = h[hi];
+    }
+    return html + esc(toks.slice(at).join(""));
+  };
+  del.html = mark(A, "a0", "a1", "del"); add.html = mark(B, "b0", "b1", "ins");
+}
+function diffRows(lines) {
+  const out = lines.map(([sign, text]) => ({ sign, text, html: esc(text) }));
+  for (let i = 0; i < out.length;) {  // a run of removed lines followed by added ones: pair them up
+    if (out[i].sign !== "-") { i++; continue; }
+    let j = i; while (j < out.length && out[j].sign === "-") j++;
+    let k = j; while (k < out.length && out[k].sign === "+") k++;
+    for (let p = 0; p < Math.min(j - i, k - j); p++) wordMarks(out[i + p], out[j + p]);
+    i = k;
+  }
+  return out;
+}
+// One column: removed lines in red above the added ones in green, as git shows them.
+function unifiedRows(h) {
+  let html = '<table class="cdT">', ia = h.a, ib = h.b;
+  for (const r of diffRows(h.lines)) {
+    const tx = `<td class="tx">${r.html || " "}</td>`;
+    if (r.sign === " ") html += `<tr class="c" data-line="${ib}"><td class="ln">${ia++}</td><td class="ln">${ib++}</td>${tx}</tr>`;
+    else if (r.sign === "-") html += `<tr class="d" data-line="${ib}"><td class="ln">${ia++}</td><td class="ln"></td>${tx}</tr>`;
+    else html += `<tr class="i" data-line="${ib}"><td class="ln"></td><td class="ln">${ib++}</td>${tx}</tr>`;
+  }
+  return html + "</table>";
+}
+// Two columns: the older version left, the newer right, a changed line facing its new form.
+function sideRows(h) {
+  const rows = diffRows(h.lines);
+  let html = '<table class="cdT cdS"><colgroup><col class="ln"><col><col class="ln"><col></colgroup>', ia = h.a, ib = h.b;
+  const cell = (n, r, cls) => r ? `<td class="ln">${n}</td><td class="tx ${cls}">${r.html || " "}</td>` : '<td class="ln"></td><td class="tx e"></td>';
+  for (let i = 0; i < rows.length;) {
+    if (rows[i].sign === " ") { html += `<tr data-line="${ib}">${cell(ia++, rows[i], "")}${cell(ib++, rows[i], "")}</tr>`; i++; continue; }
+    let j = i; while (j < rows.length && rows[j].sign === "-") j++;
+    let k = j; while (k < rows.length && rows[k].sign === "+") k++;
+    for (let p = 0; p < Math.max(j - i, k - j); p++) {
+      const d = i + p < j ? rows[i + p] : null, a = j + p < k ? rows[j + p] : null;
+      html += `<tr data-line="${ib}">${cell(d ? ia++ : "", d, "d")}${cell(a ? ib++ : "", a, "i")}</tr>`;
+    }
+    i = k;
+  }
+  return html + "</table>";
+}
+function fileDiff(f) {
+  const box = document.createElement("div"); box.className = "cdFile"; box.dataset.path = f.path;
+  let html = `<div class="cdName"><b>${esc(f.path)}</b>${f.status === "A" ? " new" : f.status === "D" ? " deleted" : ""}` +
+    ` <span class="p">+${f.add}</span> <span class="m">−${f.del}</span>` +
+    (f.status === "M" ? ` <a data-act="whole">${f.whole ? "changes only" : "whole file"}</a>` : "") +
+    (f.status !== "D" ? ` <a data-act="open">edit</a>` : "") + "</div>";
+  if (f.binary) html += '<div class="cdNote">A binary file.</div>';
+  const side = diffSide && f.status === "M";
+  if (side && f.hunks.length) html += `<div class="cdCols"><span>${esc(nameOf(codeDiff.a))}</span><span>${esc(nameOf(codeDiff.b))}</span></div>`;
+  for (const h of f.hunks) {
+    if (!f.whole) html += `<div class="cdHunk">line ${h.b || h.a}${h.head ? " · " + esc(h.head) : ""}</div>`;
+    html += side ? sideRows(h) : unifiedRows(h);
+  }
+  if (f.cut) html += '<div class="cdNote">The rest of the changes to this file are not shown.</div>';
+  box.innerHTML = html;
+  box.onclick = e => {
+    const act = e.target.dataset && e.target.dataset.act;
+    if (act === "open") editFromDiff(f.path, (f.hunks[0] || { b: 1 }).b);
+    else if (act === "whole") wholeFile(f);
+  };
+  box.ondblclick = e => { const tr = e.target.closest("tr[data-line]"); if (tr && f.status !== "D") editFromDiff(f.path, +tr.dataset.line); };
+  return box;
+}
+const wholeFiles = new Set();  // files shown whole, for the two versions on show
+async function wholeFile(f) {
+  const { a, b } = codeDiff, whole = !f.whole;
+  if (whole) wholeFiles.add(f.path); else wholeFiles.delete(f.path);
+  let d;
+  try { d = await (await fetch(`/api/srcdiff?a=${a}&b=${b}&file=${encodeURIComponent(f.path)}&ctx=${whole ? 100000 : 3}`)).json(); } catch (e) { return; }
+  if (codeDiff.a !== a || codeDiff.b !== b) return;  // other versions on show by now
+  const nf = d.files.find(x => x.path === f.path), i = codeDiff.d.files.findIndex(x => x.path === f.path);
+  if (!nf || i < 0) return;
+  nf.whole = whole; codeDiff.d.files[i] = nf;
+  const old = codeHist.querySelector(`.cdFile[data-path="${CSS.escape(f.path)}"]`);
+  if (old) old.replaceWith(fileDiff(nf));
+}
+async function editFromDiff(path, line) {
+  setTab("review");
+  if (pane === "render") setPane("split");
+  if (await openFile(path)) goToCode({ line: Math.max(0, line - 1), flash: true, focus: true });
+}
+
 // ---- keyboard ----
 // Single keys work whenever no text box has the focus; h lists them.
 const help = document.getElementById("help");
@@ -2367,6 +3660,11 @@ document.querySelectorAll(".tabmod").forEach(e => { e.textContent = isMac ? "Ctr
 document.querySelectorAll(".altkey").forEach(e => { if (isMac) e.textContent = "⌥ Option"; });  // Alt is Option on a Mac
 window.addEventListener("keydown", e => {
   const mod = isMac ? e.ctrlKey && !e.metaKey && !e.altKey : e.altKey && !e.ctrlKey && !e.metaKey;
+  if (mod && !e.shiftKey && (e.code === "KeyV" || e.code === "KeyJ")) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.code === "KeyV") setPane({ render: "code", code: "split", split: "render" }[pane]); else syncToPdf();
+    return;
+  }
   const tab = mod && !e.shiftKey && { KeyR: "review", KeyC: "chat", KeyH: "history", KeyL: "log" }[e.code];
   if (!tab) return;
   e.preventDefault(); e.stopImmediatePropagation();
@@ -2380,8 +3678,7 @@ window.addEventListener("keydown", e => {  // capture: closing the help should n
 const scroller = () => histOpen ? histPages : main;
 function stepComment(dir) {
   const show = document.getElementById("showResolved").checked;
-  const items = comments.filter(c => show || c.status !== "resolved")
-    .sort((a, b) => (a.status === "resolved") - (b.status === "resolved") || a.page - b.page);
+  const items = comments.filter(c => show || c.status !== "resolved").sort(byPlace);
   if (!items.length) return;
   const i = items.findIndex(c => c.id === activeId);
   const k = i < 0 ? (dir > 0 ? 0 : items.length - 1) : Math.max(0, Math.min(items.length - 1, i + dir));
@@ -2452,6 +3749,7 @@ document.getElementById("tabReview").onclick = () => setTab("review");
 document.getElementById("tabChat").onclick = () => setTab("chat");
 document.getElementById("tabHist").onclick = () => setTab("history");
 document.getElementById("tabLog").onclick = () => setTab("log");
+try { setPane(localStorage.getItem("pane") || "render", true); } catch (e) { setPane("render", true); }
 setTab("review");
 poll();
 </script>
