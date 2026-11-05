@@ -1364,7 +1364,7 @@ async function saveInline(send) {
 function setupInlineEdit(ta) {
   const fit = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; };
   ta.value = inlineEdit.text;
-  ta.addEventListener("input", () => { inlineEdit.text = ta.value; fit(); });
+  ta.addEventListener("input", () => { inlineEdit.text = ta.value; fit(); updateSendBtn(); });
   ta.addEventListener("keydown", e => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); saveInline(true); }
     else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); saveInline(false); }
@@ -1483,7 +1483,7 @@ document.addEventListener("mouseup", ev => {
 });
 function closePop() {
   const code = pending && pending.file;
-  pop.style.display = "none"; pending = null; drawHighlights();
+  pop.style.display = "none"; pending = null; drawHighlights(); updateSendBtn();
   if (code) { drawCodeMarks(); if (cm) cm.focus(); }
 }
 document.getElementById("popCancel").onclick = closePop;
@@ -1531,6 +1531,7 @@ document.addEventListener("copy", e => {
 });
 // In the comment box: Enter saves, Shift+Enter adds a new line, Cmd+Enter saves and
 // sends all open comments, Esc cancels.
+popText.addEventListener("input", () => updateSendBtn());
 popText.addEventListener("keydown", async e => {
   // Some browsers send no copy event when nothing is selected in the box, so catch Cmd/Ctrl+C here.
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !e.shiftKey && !e.altKey &&
@@ -1648,8 +1649,19 @@ const GIT = {
   commit: ["Commit", "Committing…", a => `Ask ${a} to commit the edits from this review (Cmd+Shift+Enter)`],
   push: ["Push", "Pushing…", a => `Ask ${a} to push the commits`],
 };
+// Text typed but not saved yet, which Send saves first: a reply to the agent or an edit in a
+// comment's card, or a new comment in the selection box. Counts as a comment when saving it
+// opens one that is not open now.
+function draftCount() {
+  if (inlineEdit && inlineEdit.text.trim()) {
+    const c = comments.find(x => x.id === inlineEdit.id);
+    const changes = inlineEdit.mode === "reply" || (c && inlineEdit.text.trim() !== c.comment);
+    return c && changes && c.status !== "open" ? 1 : 0;
+  }
+  return pending && pop.style.display !== "none" && sideTab !== "chat" && popText.value.trim() ? 1 : 0;
+}
 function updateSendBtn() {
-  const n = comments.filter(c => c.status === "open").length, t = request_;
+  const n = comments.filter(c => c.status === "open").length + draftCount(), t = request_;
   const tr = document.getElementById("tabReview");
   tr.replaceChildren("Review");
   if (n) { const b = document.createElement("span"); b.className = "cnt"; b.textContent = n; b.title = `${n} open comment${n === 1 ? "" : "s"}`; tr.append(b); }
@@ -1672,6 +1684,8 @@ async function request(action) {
   updateSendBtn();
 }
 async function sendComments() {
+  if (inlineEdit && inlineEdit.text.trim()) return saveInline(true);  // saves, then sends
+  if (pending && pop.style.display !== "none" && sideTab !== "chat" && popText.value.trim()) await savePop();
   if (!comments.some(c => c.status === "open")) await loadComments();
   if (!comments.some(c => c.status === "open")) return;
   request("comments");
