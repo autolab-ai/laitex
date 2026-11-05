@@ -123,9 +123,9 @@ The viewer also:
   one zoom and one reading position, across and down the page, so the History tab opens where
   you were reading and switching back returns to where you left the history. Reloading the page
   keeps both, per PDF, in this browser;
-- makes citations and section, figure and equation references clickable, with a preview of
-  the target on hover: the text of a citation or section, and the figure or the typeset
-  equation itself, cut from its page;
+- makes citations and section, figure, table and equation references clickable, with a preview
+  of the target on hover: the text of a citation or section, and the figure, the table or the
+  typeset equation itself, cut from its page;
 - jumps to a comment when you click it in the sidebar, where you can also edit, resolve,
   reopen or delete it. An edited comment goes to the agent again with the next send;
 - keeps every build of the PDF (the history button, a tab next to the chat): the tab lists the
