@@ -1274,8 +1274,12 @@ function drawHighlights() {
 function esc(s) { return (s || "").replace(/[&<>]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch])); }
 
 // Open comments first; those on the pages by page, then those on the code by file and line.
-const byPlace = (a, b) => (a.status === "resolved") - (b.status === "resolved") || !!a.file - !!b.file ||
-  (a.file ? a.file.localeCompare(b.file) || a.line - b.line : a.page - b.page);
+// Resolved comments follow, most recently resolved first. Comments resolved before the time was
+// kept fall back to when they were answered, then to when they were made.
+const resolvedAt = c => c.resolved || c.replied || c.created || "";
+const byPlace = (a, b) => (a.status === "resolved") - (b.status === "resolved") ||
+  (a.status === "resolved" && b.status === "resolved" && resolvedAt(b).localeCompare(resolvedAt(a))) ||
+  !!a.file - !!b.file || (a.file ? a.file.localeCompare(b.file) || a.line - b.line : a.page - b.page);
 const whereOf = c => c.file ? `${c.file}:${c.line}` : `p.${c.page}`;
 function drawList() {
   const show = document.getElementById("showResolved").checked;

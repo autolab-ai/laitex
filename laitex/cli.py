@@ -1820,6 +1820,8 @@ def make_handler(st, agent_name, versions):
                 items = st.load()
                 for c in items:
                     if c["id"] == cid:
+                        if data.get("status") == "resolved" and c.get("status") != "resolved":
+                            c["resolved"] = now()  # the list of resolved comments is newest first
                         for k in ("status", "comment", "reply", "page", "rects", "context"):
                             if k in data:
                                 c[k] = data[k]
@@ -2068,6 +2070,8 @@ def cmd_reply(a):
             thread.pop()  # a second reply before the user answers revises the first
         hit[0]["thread"] = thread + [{"role": "agent", "text": text, "time": now()}]
         hit[0]["reply"] = text
+        if a.status == "resolved" and hit[0].get("status") != "resolved":
+            hit[0]["resolved"] = now()
         hit[0]["status"] = a.status
         hit[0]["replied"] = now()
         st.save(items)

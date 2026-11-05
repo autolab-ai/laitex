@@ -127,7 +127,8 @@ The viewer also:
   of the target on hover: the text of a citation or section, and the figure, the table or the
   typeset equation itself, cut from its page;
 - jumps to a comment when you click it in the sidebar, where you can also edit, resolve,
-  reopen or delete it. An edited comment goes to the agent again with the next send;
+  reopen or delete it. An edited comment goes to the agent again with the next send. With
+  "show resolved" on, the resolved comments follow the open ones, most recently resolved first;
 - keeps every build of the PDF (the history button, a tab next to the chat): the tab lists the
   builds with how many lines and characters of text each one added and removed, and selectors at
   its top pick the build to show and the one to compare it with. The pages then show what changed,
