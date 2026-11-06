@@ -108,7 +108,7 @@
          border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.2); padding: 8px; }
   #pop textarea { width: 100%; height: 90px; font: inherit; }
   #pop .btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
-  #pop #popCopy { margin-right: auto; }
+  #pop .btns .left { display: flex; gap: 6px; margin-right: auto; }
   #pop .btns button.main { background: #d97757; color: #fff; border: 1px solid #d97757; border-radius: 4px; }
   #tabs .cnt { display: inline-block; min-width: 16px; margin-left: 4px; padding: 0 4px; border-radius: 8px;
                font-size: 10px; line-height: 15px; text-align: center; color: #fff; background: #d97757; }
@@ -585,7 +585,7 @@ try { const w = +localStorage.getItem("side"); if (w) document.documentElement.s
 <button id="back" title="Back (Alt+Left, Option+Left on a Mac)">&larr; back</button>
 <div id="pop">
   <textarea id="popText"></textarea>
-  <div class="btns"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popCancel">Cancel</button><button id="popSave" title="Keep it as a review comment">Comment</button></div>
+  <div class="btns"><span class="left"><button id="popCopy" title="Copy the selected text (Cmd+C)">Copy text</button><button id="popLocate" title="Show the selected text in the source (or Cmd+click the PDF)">Find in code</button></span><button id="popCancel">Cancel</button><button id="popSave" title="Keep it as a review comment">Comment</button></div>
 </div>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -596,6 +596,7 @@ const H = { "Content-Type": "application/json", "X-Laitex": "1" };
 const pagesEl = document.getElementById("pages");
 const statusEl = document.getElementById("status");
 let mtime = null, comments = [], loading = false, pending = null, activeId = null, inlineEdit = null;
+let pendingEl = null;  // the page the selection in the comment box is on
 let agentName = "the agent", request_ = null;
 const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 let doc = null, sizes = [], gen = 0;  // sizes: unscaled page sizes in PDF points
@@ -1384,6 +1385,8 @@ function openPop(r) {
   popText.placeholder = chat ? "Enter: ask in the chat · Shift+Enter: new line · Esc: cancel"
                              : "Enter: save the comment · Shift+Enter: new line · Cmd+Enter: save and send · Esc: cancel";
   document.getElementById("popSave").classList.toggle("main", !chat);
+  // Finding the text in the source needs the source, and a page of the current build.
+  locateBtn.style.display = srcRoot && pending && !pending.file && pendingEl && pendingEl.closest("#pages") ? "" : "none";
   pop.style.display = "block"; popText.value = "";
   drawHighlights();  // keep the selected text marked while typing
   popText.focus();
@@ -1471,6 +1474,7 @@ document.addEventListener("mouseup", ev => {
     // Across pages, the quote is the selected text without the furniture in between.
     const quote = (per.length > 1 ? boxes.text.join(" ").replace(/\s+([,.;:!?)\]])/g, "$1") : sel.toString()).replace(/\s+/g, " ").trim();
     pending = { page: per[0].page, quote, context: contextOf(pageEl, quote, range), rects: per[0].rects };
+    pendingEl = pageEl;
     if (per.length > 1) pending.more = per.slice(1);
     // On a History page of an older version, the comment is about that version.
     if (pageEl.classList.contains("hpage") && cmp) {
@@ -1483,7 +1487,7 @@ document.addEventListener("mouseup", ev => {
 });
 function closePop() {
   const code = pending && pending.file;
-  pop.style.display = "none"; pending = null; drawHighlights(); updateSendBtn();
+  pop.style.display = "none"; pending = null; pendingEl = null; drawHighlights(); updateSendBtn();
   if (code) { drawCodeMarks(); if (cm) cm.focus(); }
 }
 document.getElementById("popCancel").onclick = closePop;
@@ -1523,6 +1527,15 @@ async function copyQuote() {
   copied(); popText.focus();
 }
 copyBtn.onclick = copyQuote;
+// Show the selected text in the source: the line SyncTeX gives for the middle of its first
+// line, as Cmd+click does there. The comment box stays open, and keeps the keyboard.
+const locateBtn = document.getElementById("popLocate");
+locateBtn.onclick = async () => {
+  if (!pending || !pendingEl || !pending.rects || !pending.rects.length) return;
+  const [x, y, w, h] = pending.rects[0], r = pendingEl.getBoundingClientRect();
+  await syncToCode(pendingEl, r.left + (x + w / 2) * r.width, r.top + (y + h / 2) * r.height, false);
+  popText.focus();
+};
 document.addEventListener("copy", e => {
   if (!pending || pop.style.display !== "block") return;
   if (document.activeElement === popText && popText.selectionStart !== popText.selectionEnd) return;
@@ -3521,7 +3534,7 @@ function textAt(div, cx, cy) {
   const lo = Math.max(0, at - 300);
   return { text: txt.slice(lo, at + 300), at: at - lo };
 }
-async function syncToCode(div, cx, cy) {
+async function syncToCode(div, cx, cy, focus = true) {
   const n = +div.dataset.page, r = div.getBoundingClientRect(), sz = sizes[n - 1];
   const x = (cx - r.left) / r.width * sz.w, y = (cy - r.top) / r.height * sz.h;
   let hit = null;
@@ -3532,7 +3545,7 @@ async function syncToCode(div, cx, cy) {
   }
   if (!hit || !hit.file) { statusEl.textContent = "that spot was not found in the source"; return; }
   if (pane === "render") setPane("split");
-  if (await openFile(hit.file)) goToCode({ line: hit.line - 1, ch: hit.ch || 0, flash: true, focus: true });
+  if (await openFile(hit.file)) goToCode({ line: hit.line - 1, ch: hit.ch || 0, flash: true, focus });
 }
 const HIDDEN_ARGS = new Set(["cite", "citep", "citet", "citealp", "citeauthor", "citeyear", "parencite", "textcite", "autocite",
   "ref", "eqref", "autoref", "cref", "Cref", "pageref", "nameref", "label", "includegraphics", "input", "include", "usepackage",
