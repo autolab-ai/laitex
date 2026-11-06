@@ -1032,7 +1032,11 @@ _SYNCTEX = {}
 
 def synctex_for(st):
     """The SyncTeX data of the current build, parsed once per build, or None without a file."""
-    stems = {os.path.splitext(st.pdf)[0], os.path.splitext(st.log_path())[0]}
+    # The one next to the PDF first: a build in a temporary copy (--log points there) leaves one
+    # there too, whose paths name the copy, not the project, so nothing on the page maps back.
+    stems = [os.path.splitext(st.pdf)[0]]
+    if os.path.splitext(st.log_path())[0] not in stems:
+        stems.append(os.path.splitext(st.log_path())[0])
     for stem in stems:
         for path in (stem + ".synctex.gz", stem + ".synctex"):
             try:
